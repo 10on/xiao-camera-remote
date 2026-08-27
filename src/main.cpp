@@ -1,8 +1,11 @@
 #include <Arduino.h>
 #include <NimBLEDevice.h>
+#include <esp_sleep.h>
+#include <driver/rtc_io.h>
 
 #include "config.h"
 #include "display.h"
+#include "pcf8575.h"
 #include "buttons.h"
 #include "battery.h"
 #include "ble_manager.h"
@@ -10,13 +13,106 @@
 #include "led.h"
 #include "buzzer.h"
 #include "menu.h"
+#include "settings.h"
 
 static const ButtonId kAllButtons[] = {
 	ButtonId::Up, ButtonId::Down, ButtonId::Left, ButtonId::Right, ButtonId::Ok,
 };
 
+// Set in setup() when waking from deep sleep via the center button;
+// consumed (and cleared) the first time an Ok event actually shows up in
+// loop() — see the wake-cause comment in setup().
+static bool ignoreNextOkEvent = false;
+
+// Deep sleep (v14 §7, stage 2 only — see config.h). Puts both status
+// LEDs off first: they live on the PCF8575, which stays powered
+// independently of the MCU's sleep state, so they'd otherwise keep
+// burning current showing stale state through the whole sleep.
+static void enterDeepSleep() {
+	statusLed.setPower(false);
+	statusLed.setActivity(false);
+	statusLed.update();
+
+	// The ST7789/NV3030B panel keeps showing its last frame with zero
+	// drive from the MCU — without this, the screen looks fully awake the
+	// whole time we're actually asleep, backlight included.
+	//
+	// Plain digitalWrite() only holds the pin through the regular GPIO
+	// matrix, which powers down for the duration of deep sleep — same
+	// issue as PIN_BTN_OK below, just for an output instead of an input.
+	// The pin drifts back to its floating reset state once the digital
+	// domain is off, and the backlight looks like it never turned off.
+	// Route it through the RTC GPIO domain (stays powered) and latch the
+	// LOW level with rtc_gpio_hold_en() so it actually sticks; released
+	// again in setup() on wake, since the hold also blocks display.begin()
+	// from turning the backlight back on otherwise.
+#ifdef PIN_TFT_BL
+	rtc_gpio_init((gpio_num_t)PIN_TFT_BL);
+	rtc_gpio_set_direction((gpio_num_t)PIN_TFT_BL, RTC_GPIO_MODE_OUTPUT_ONLY);
+	rtc_gpio_set_level((gpio_num_t)PIN_TFT_BL, 0);
+	rtc_gpio_hold_en((gpio_num_t)PIN_TFT_BL);
+#endif
+
+	// Hand the pin to the RTC domain explicitly — plain pinMode()'s
+	// pull-up (regular GPIO matrix) doesn't carry over to deep sleep. Without
+	// this, the pin can float LOW right as sleep starts, and since ext0 is a
+	// level trigger (not edge), that instantly wakes the chip back up —
+	// looks exactly like "never actually sleeps".
+	rtc_gpio_init((gpio_num_t)PIN_BTN_OK);
+	rtc_gpio_set_direction((gpio_num_t)PIN_BTN_OK, RTC_GPIO_MODE_INPUT_ONLY);
+	rtc_gpio_pullup_en((gpio_num_t)PIN_BTN_OK);
+	rtc_gpio_pulldown_dis((gpio_num_t)PIN_BTN_OK);
+	esp_sleep_enable_ext0_wakeup((gpio_num_t)PIN_BTN_OK, 0); // wake on LOW (button press)
+	esp_sleep_enable_timer_wakeup((uint64_t)DAILY_CHECK_SEC * 1000000ULL);
+	esp_deep_sleep_start(); // does not return
+}
+
+// Woken solely to check the battery (daily timer, not a button press) —
+// skip display/BLE entirely and go straight back to sleep, so this is as
+// short and low-power as possible. A critically low reading blinks the
+// yellow LED a few times before sleeping again.
+static void handleDailyCheckAndResleep() {
+	pcf8575.begin(PCF8575_ADDRESS, PIN_I2C_SDA, PIN_I2C_SCL, PIN_PCF_INT);
+	battery.begin();
+	battery.update();
+
+	if (battery.percent() <= BATT_CRITICAL_PCT) {
+		for (int i = 0; i < 5; i++) {
+			pcf8575.writeBit(PCF_BIT_LED_YELLOW, false); // active-LOW: on
+			delay(150);
+			pcf8575.writeBit(PCF_BIT_LED_YELLOW, true); // off
+			delay(150);
+		}
+	}
+
+	enterDeepSleep();
+}
+
 void setup() {
 	Serial.begin(SERIAL_BAUD);
+
+	esp_sleep_wakeup_cause_t wakeCause = esp_sleep_get_wakeup_cause();
+	if (wakeCause == ESP_SLEEP_WAKEUP_TIMER) {
+		handleDailyCheckAndResleep(); // never returns
+	}
+
+	// Undo the rtc_gpio_hold_en()/rtc_gpio_init() from enterDeepSleep().
+	// hold_dis() alone releases the latched LOW *value*, but doesn't hand
+	// the pad back to the digital GPIO matrix — it can stay routed through
+	// the RTC module, which is fine for pinMode()+digitalWrite() (confirmed
+	// working for PIN_BTN_OK below) but silently leaves analogWrite()'s
+	// LEDC output with nowhere to go, so the backlight never comes back
+	// after the first sleep. rtc_gpio_deinit() explicitly returns the pad
+	// to GPIO-matrix control, which is what LEDC needs to actually drive
+	// it. No-op on a fresh boot, where nothing is held yet.
+#ifdef PIN_TFT_BL
+	rtc_gpio_hold_dis((gpio_num_t)PIN_TFT_BL);
+	rtc_gpio_deinit((gpio_num_t)PIN_TFT_BL);
+#endif
+
+	settings.begin(); // must run before display.begin(), which reads settings.brightness()
+
+	pcf8575.begin(PCF8575_ADDRESS, PIN_I2C_SDA, PIN_I2C_SCL, PIN_PCF_INT);
 
 	buttons.begin();
 	battery.begin();
@@ -29,6 +125,13 @@ void setup() {
 
 	menu.begin();
 	menu.render();
+
+	// Woken by the center button from deep sleep: that press only wakes
+	// the MCU, per v14 §7 — the actual Press/LongPress event for Ok
+	// hasn't necessarily fired yet at this point (it only fires on
+	// release, and the button may still be held), so this is consumed in
+	// loop() the first time it actually shows up, not here.
+	ignoreNextOkEvent = (wakeCause == ESP_SLEEP_WAKEUP_EXT0);
 }
 
 void loop() {
@@ -37,22 +140,57 @@ void loop() {
 	bleManager.update();
 	ota.update();
 	buzzer.update();
+	statusLed.update();
 
 	bool dirty = false;
 	for (ButtonId id : kAllButtons) {
 		ButtonEvent ev = buttons.poll(id);
-		if (ev != ButtonEvent::None) {
-			buzzer.beep(); // tactile/audio confirmation the press registered
-			menu.handleButton(id, ev);
-			dirty = true;
+		if (ev == ButtonEvent::None) continue;
+
+		if (id == ButtonId::Ok && ignoreNextOkEvent) {
+			ignoreNextOkEvent = false; // the wake-up press — consume silently
+			continue;
 		}
+
+		buzzer.beep(); // tactile/audio confirmation the press registered
+		menu.handleButton(id, ev);
+		dirty = true;
 	}
 
+	// A full render() does a fillScreen() first — needed when navigating to
+	// a different screen or on an OTA state transition (different widgets
+	// per state), but doing that unconditionally on every tick was the
+	// actual bug: this used to call menu.render() on a timer regardless of
+	// whether anything had changed, and every one of those flashed the
+	// whole panel blank before redrawing over it — a periodic flicker no
+	// matter how long that timer was tuned to (500ms, then 3000ms). Fields
+	// that legitimately tick on their own (battery%, BLE connect state,
+	// slider telemetry) now go through menu.renderDynamic() instead, which
+	// only touches the small regions that actually changed — see menu.cpp.
+	static Ota::State lastOtaState = Ota::State::Idle;
+	bool otaChanged = ota.state() != lastOtaState;
+	lastOtaState = ota.state();
+
+	static const uint32_t kDynamicRenderMs = 300;
 	static uint32_t lastRender = 0;
 	uint32_t now = millis();
-	if (dirty || (now - lastRender) > 500) {
+	if (dirty || otaChanged) {
 		menu.updateStatusLed();
 		menu.render();
 		lastRender = now;
+	} else if (now - lastRender > kDynamicRenderMs) {
+		menu.updateStatusLed();
+		menu.renderDynamic();
+		lastRender = now;
+	}
+
+	// Deep sleep after IDLE_DEEPSLEEP_MS of no button activity at all
+	// (v14 §7 stage 2). Any button event resets the idle clock.
+	static uint32_t lastActivityMs = 0;
+	if (dirty) {
+		lastActivityMs = now;
+	}
+	if (now - lastActivityMs > IDLE_DEEPSLEEP_MS) {
+		enterDeepSleep(); // does not return
 	}
 }
