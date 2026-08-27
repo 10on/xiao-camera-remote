@@ -13,6 +13,7 @@ enum class Command {
 	Home,
 	SpeedUp,
 	SpeedDown,
+	EmergencyStop,
 	Record,
 	StopRecord,
 };
