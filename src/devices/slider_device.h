@@ -9,6 +9,9 @@ class SliderDevice : public Device, public NimBLEClientCallbacks {
 public:
 	const char *name() const override { return "Slider"; }
 	const char *advertisedName() const override { return "Camera_Slider"; }
+	const char *abbrev() const override { return "SL"; } // "СЛ" in the design; see docs/screen-design.md
+	uint16_t identityColor565() const override;
+	uint16_t identityTextColor565() const override;
 
 	bool isActive() const override { return _active; }
 	bool isConnected() const override { return _connected; }
@@ -17,7 +20,7 @@ public:
 
 	void tick() override;
 	void handleCommand(Command cmd) override;
-	void renderStatusLine(Adafruit_ST7789 &tft, int16_t y) override;
+	void renderStatusLine(Adafruit_GFX &tft, int16_t y) override;
 	void beginGattConnection(const NimBLEAdvertisedDevice *adv) override;
 
 	// NimBLEClientCallbacks

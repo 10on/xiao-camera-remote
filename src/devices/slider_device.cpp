@@ -1,6 +1,15 @@
 #include "slider_device.h"
+#include "../theme.h"
 
 SliderDevice sliderDevice;
+
+uint16_t SliderDevice::identityColor565() const {
+	return theme::kSliderFill;
+}
+
+uint16_t SliderDevice::identityTextColor565() const {
+	return theme::kSliderText;
+}
 
 // UUIDs from ~/projects/slider/docs/03_ble_protocol.md
 static const NimBLEUUID kServiceUUID("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
@@ -104,6 +113,7 @@ void SliderDevice::handleCommand(Command cmd) {
 		sendCommand('B');
 		break;
 	case Command::StopMove:
+	case Command::EmergencyStop:
 		sendCommand('S');
 		break;
 	case Command::Home:
@@ -120,12 +130,13 @@ void SliderDevice::handleCommand(Command cmd) {
 	}
 }
 
-void SliderDevice::renderStatusLine(Adafruit_ST7789 &tft, int16_t y) {
-	tft.setCursor(10, y);
-	tft.setTextSize(2);
-	tft.setTextColor(0xFFFF);
+void SliderDevice::renderStatusLine(Adafruit_GFX &tft, int16_t y) {
+	tft.setCursor(theme::kPadH, y);
+	tft.setTextSize(theme::kSizeBody);
+	tft.setTextColor(theme::kTextPrimary);
 
 	if (!_connected) {
+		tft.setTextColor(_active ? theme::kWarnFill : theme::kTextInactive);
 		tft.printf("%s: %s", name(), _active ? "connecting..." : "off");
 		return;
 	}
