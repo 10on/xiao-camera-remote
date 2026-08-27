@@ -44,6 +44,17 @@ uint16_t DollyDevice::identityTextColor565() const {
 	return theme::kDollyText;
 }
 
+// Body slab + two wheels (mock icon set).
+void DollyDevice::drawGlyph(Adafruit_GFX &g, int16_t x, int16_t y, int16_t s, uint16_t c) const {
+	int16_t iw = s * 16 / 26, ih = s * 13 / 26;
+	int16_t ix = x + (s - iw) / 2, iy = y + (s - ih) / 2;
+	int16_t r = ih * 5 / 26;
+	if (r < 2) r = 2;
+	g.fillRoundRect(ix, iy, iw, ih * 6 / 13, 1, c);              // body
+	g.fillCircle(ix + r + 1, iy + ih - r, r, c);                  // left wheel
+	g.fillCircle(ix + iw - r - 1, iy + ih - r, r, c);             // right wheel
+}
+
 bool DollyDevice::matchesAdvertisement(const NimBLEAdvertisedDevice *adv) const {
 	if (!adv->haveName()) return false;
 	const std::string name = adv->getName();
@@ -177,7 +188,11 @@ void DollyDevice::handleCommand(Command cmd) {
 		writePacket(kMoveLeft);
 		break;
 	case Command::StopMove:
+	case Command::StopProgram:
 		normalStop();
+		break;
+	case Command::StartProgram:
+		writePacket(kMoveRight);
 		break;
 	case Command::SpeedUp:
 		setSpeed(_speedLevel + 1);

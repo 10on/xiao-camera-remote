@@ -104,8 +104,8 @@ inline void drawIconChip(Adafruit_GFX &tft, int16_t x, int16_t y,
 	tft.print(abbrev);
 }
 
-// Draws one row of a selectable list (Menu/Profile-select/Binding-presets
-// screens): a full-width rounded plate in `kOkFill` for the active item,
+// Draws one row of a selectable list (the Rigs / Settings screens): a
+// full-width rounded plate in `kOkFill` for the active item,
 // plain inactive-colored text otherwise — the spec's "active = green
 // gradient plate" language, flattened to a solid fill since Adafruit_GFX
 // has no cheap gradient fill (same simplification `drawTopBar` uses for

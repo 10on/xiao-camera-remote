@@ -13,6 +13,9 @@ enum class Command {
 	Home,
 	SpeedUp,
 	SpeedDown,
+	StartProgram, // start the device-owned selected preset
+	StopProgram,
+	ResetFault,   // clear a device error state (slider 'R')
 	EmergencyStop,
 	Record,
 	StopRecord,

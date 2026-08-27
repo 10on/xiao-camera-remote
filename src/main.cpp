@@ -12,7 +12,9 @@
 #include "ota.h"
 #include "led.h"
 #include "buzzer.h"
+#include "device_registry.h"
 #include "menu.h"
+#include "rig_store.h"
 #include "settings.h"
 
 static const ButtonId kAllButtons[] = {
@@ -111,6 +113,8 @@ void setup() {
 #endif
 
 	settings.begin(); // must run before display.begin(), which reads settings.brightness()
+	rigStore.begin();
+	deviceRegistry.begin();
 
 	pcf8575.begin(PCF8575_ADDRESS, PIN_I2C_SDA, PIN_I2C_SCL, PIN_PCF_INT);
 
@@ -141,8 +145,14 @@ void loop() {
 	ota.update();
 	buzzer.update();
 	statusLed.update();
+	deviceRegistry.tick();
 
-	bool dirty = false;
+	// Session transitions that happen without a button press: a rig's Main
+	// finishing its connection (Connecting -> Control), or its link dropping
+	// (control -> lost-Main takeover, plus an auto E-Stop if mid-take).
+	// Returns true when the screen needs the full redraw render() does.
+	bool dirty = menu.update();
+
 	for (ButtonId id : kAllButtons) {
 		ButtonEvent ev = buttons.poll(id);
 		if (ev == ButtonEvent::None) continue;
@@ -152,7 +162,7 @@ void loop() {
 			continue;
 		}
 
-		buzzer.beep(); // tactile/audio confirmation the press registered
+		if (settings.buttonSound()) buzzer.beep(); // tactile/audio confirmation
 		menu.handleButton(id, ev);
 		dirty = true;
 	}

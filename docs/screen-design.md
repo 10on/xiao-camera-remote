@@ -5,25 +5,82 @@ Code-facing distillation of the design handoff archived in
 rationale; this file only keeps what `src/theme.h` and `src/menu.cpp`
 actually implement from it, in target-panel px, not mockup px).
 
-## Status: what's implemented vs. designed-but-not-built
+## Authoritative UI/UX spec: `docs/design/ux-redesign.md` + the pixel mock
 
-The handoff specs 7 screen states. This firmware has all 7 visual states
-(`DeviceList`, `Control`, `Settings`/OTA, `ProfileSelect`, `BindingPresets`
-— see `src/menu.h`) plus a connection-lost takeover that overlays
-`DeviceList`/`Control` rather than being its own `Screen`.
+As of **2026-08-27** the authoritative source for screen *model* and *flow*
+is `docs/design/ux-redesign.md` (built from real shooting experience), and
+for pixel layout the mock bundle `docs/design/ux-redesign-mock/`
+(`new-model.dc.html` — 24 screens at 280×240 in this firmware's own
+palette; `current-screens.dc.html` — the pre-redesign 9). They override the
+old handoff screen list and `filming-remote-requirements-v14.md` §3
+("Профили") where they disagree. The handoff's **colour system, typography,
+and geometry** still stand.
 
-| Spec screen | Status |
+**Direction, in one line:** the home screen is *Configurations*, not the
+device list. You pick a shooting rig (Main + Secondary devices), the remote
+auto-connects only that rig's devices, and opens straight into Main-centric
+control with a compact REC block. Device List demotes to a diagnostics
+screen under *Settings › Devices*.
+
+### Implemented — full mock, branch `ux-redesign-rigs`
+
+Copy is **English placeholder** (`CONFIGS`, `OK - REC`, `RUN >`) — the mock
+is Russian and a Cyrillic `GFXfont` is a tracked follow-up (see the
+"Cyrillic text" section below). Not flashed / hardware-tested; layout is
+close to the mock but not pixel-verified.
+
+Code is split: `src/menu.cpp` (state machine + input), `src/menu_render.cpp`
+(all `render*`), `src/menu_internal.h` (shared rig/session helpers).
+
+| Mock screen | Firmware |
 |---|---|
-| Main / idle | ✅ implemented as `renderDeviceList()` — one row per registered phone/slider/dolly, with the active profile in the header |
-| Main / recording | ✅ implemented as `renderRecording()` with a live `MM:SS` / `H:MM:SS` timer; entered by the phone+motion combo action |
-| Main / connection lost | ✅ implemented as a full-screen takeover (`Menu::renderConnectionLost()`), except while recording so the timer keeps priority |
-| Profile select | ✅ implemented as a three-row scrolling window over the five real profiles in `src/profile.cpp` |
-| Binding presets | ✅ implemented as the three real D-pad mappings from `src/profile.cpp` |
-| Menu / settings | ✅ implemented as a real 3-item list (`PROFILES`/`BRIGHTNESS`/`OTA UPDATE`) plus an inline brightness adjuster and an OTA-start yes/no confirm (both `Settings` sub-states, not separate screens — see `Menu::SettingsMode`) |
-| OTA mode | ✅ implemented, adapted: shows the *real* STA-mode SSID/IP `ota.cpp` gets, not the spec mockup's fixed AP IP `192.168.4.1` (this firmware joins an existing network rather than hosting its own AP) |
+| 1 / 16 / 17 Configurations | `Screen::Rigs` / `renderRigs()` — 3-row window over `rigStore`, green "last-used" plate with `LAST` tag + `SL + PH` composition, scrollbar, empty-state. Ok launches, `>` → RigMenu, hold-`<` → Settings |
+| 2 / 3 Connecting | `Screen::Connecting` / `renderConnecting()` — `MAIN` row boxed + separated from `SECONDARY`/`CAMERAS`, progress bar, 25 s → `NO RESPONSE` + retry. `Menu::update()` auto-advances to Control when Main (or, Main-less, a phone) links |
+| 4 / 5 / 8 Control | `renderControlMotion()` — identity chip, state pill, `SPEED n /max` numeral + `Device::speedLevel()` 8-seg bar, bottom action block. **Two modes by Main type:** a **program-driven** Main (slider — has `Device::programName()`) shows the program name + E1/E2 endstop telemetry, no jog arrows; all 4 arrows adjust program speed; the state pill is real telemetry (`Device::motionStateText()` → `IDLE`/`RUNNING`/`MANUAL`/`HOMING`/`ERROR`); when there's no camera, `OK` is the program's explicit `START`/`STOP`; `inFault()` swaps the block to `FAULT - HOLD OK TO CLEAR` (long-Ok → `Command::ResetFault`). A **legacy** Main (dolly) keeps travel triangles + arrow jog per the axis-binding setting, `HOME` pill iff `supportsHome()`, locally-tracked `IDLE`/`RUN >`/`RUN <`. |
+| 6 / 7 Take | same screen, red timer block (`MM:SS`, `* REC`, `n/m CAM`) + `! A CAMERA LOST LINK` yellow strip; Main controls stay live |
+| 9 Cameras-only | `renderControlCamerasOnly()` — phone rows + big `OK - REC` box / centred timer |
+| 10 Main lost | `renderMainLost()` (overlay on Control, Main loss **outside** a take only); `Menu::update()` auto-fires E-Stop + StopRecord if the link drops mid-take (§4) |
+| 11–13 Rig editor | `Screen::Editor` — 4 steps: name (→ TextEntry), Main (motion devices + None), Secondary (camera checkboxes, `>` toggles), take mode. `saveEditor()` → `rigStore` |
+| 14 Settings | `renderSettings()` — Configs / Devices / Control / Screen / System, brightness mini-bar on the Screen row |
+| 15 / 21 Devices + card | `Screen::Devices` / `renderDevices()` list (alias, kind, coarse "seen"); `Screen::DeviceCard` — ID, last-seen, `IN RIGS n`, Test link (toggles activation), Rename |
+| 18 Rig menu | `Screen::RigMenu` — Edit / Duplicate / Rename / Delete (`rigStore` CRUD) |
+| 19 Name entry | `Screen::TextEntry` — block cursor + letter ribbon, 5-button; shared by editor step 1, rig rename, device rename |
+| 20 Scan | `Screen::Scan` — one-shot `NimBLEScan` (guarded: only with no live session), lists name + RSSI. "Add to registry" is a no-op stub — dynamic drivers are a later phase |
+| 22 Control prefs | `Screen::ControlPrefs` — Axes toggle, Max speed (`settings.maxSpeedLevel()` cap), Autostart last, Key sound; `←→` changes value |
+| 23 System | `Screen::System` — firmware, battery V, OTA (confirm modal), Factory reset (`settings.factoryReset()` + `ESP.restart()`) |
+| OTA active | `renderOtaActive()` — real STA-mode SSID/IP, not the mock's fixed AP |
+| 24 Turntable | not built — no turntable driver yet |
 
-Still not designed or built: a dedicated low-battery/charging screen and
-the product-turntable device.
+**New data model:** `src/rig.h` — `Rig { name[21], mainIndex, secondary[4],
+secondaryCount, takeMode }`, mutable. `src/rig_store.*` — NVS blob
+(versioned), seeds ux-redesign.md §5 defaults, CRUD for the editor.
+`src/device_table.*` — the stable `deviceAt()/deviceCount()/deviceIndexOf()`
+identity used by rigs. `src/device_registry.*` — per-device alias (NVS) +
+coarse `SeenState`. `Device::kind()` / `supportsHome()` / `speedLevel()` /
+`speedLevelMax()`. `src/settings.*` gains `axisBinding`, `autostartLastRig`,
+`maxSpeedLevel`, `buttonSound`; old `profile`/`binding` NVS keys abandoned.
+
+**Slider program API (2026-08-28):** migrated to the slider repo's
+`docs/11_program_api.md` model — the pult drives the **Ping-Pong program**
+(select on connect, START/STOP, CONFIGURE speed%, confirmed state from
+notify), never faked F/B. `Rig` take: `RecordAndMoveMain` sends
+`StartProgram`/`StopProgram` for a program-capable Main (else legacy
+`MoveForward`/`StopMove`). Slider rigs now default to `RecordAndMoveMain`
+(`rig_store` layout bumped to v2 → reseed). Manual jog / go-to-pos / home
+calibration / current belong on a future **Advanced/Service** screen (not
+built) — on entry it must send Program `STOP`, on exit `SELECT`.
+
+**Deferred:** an Advanced/Service screen for the slider (manual jog,
+go-to-position, current, home calibration); multiple phones + BLE HID multi-host validation (the `Phones`
+rig currently binds one phone); real device registration from the Scan
+screen (needs dynamic drivers); turntable driver; a dedicated
+battery/charge screen; sleep controls under Screen prefs; pictogram device
+icons (chips still use the 2-letter `abbrev()`).
+
+**Still in force from `requirements-v14`:** emergency stop = long-Ok →
+broadcast stop (§9); device-side motion watchdog ~2 s (§9); deep sleep as
+the rest state + "first press only wakes" (§7); phone record indication is
+about the *take* / command delivery, never a confirmed-recording claim (§2).
 
 **Brightness control (`Яркость`) is implemented**, via `src/settings.h`
 (persisted 0–255 value) and `Display::setBrightness()`
@@ -114,7 +171,7 @@ a UTF-8-capable font layer; the current copy remains Latin placeholders.
 | Row gap | 9 |
 | List item padding | 9×12, radius 11 |
 
-Selection on the device list (Up/Down + Ok-to-toggle — not in the
-original 7 mocks, since the spec assumes bindings pick devices rather
-than a navigable list) is shown as a 3px left accent bar in the row's
-identity color, replacing the old `"> "` text cursor.
+Selection on the `Devices` diagnostics screen (Up/Down + Ok-to-toggle) is
+shown as a 3px left accent bar in the row's identity color, not a `"> "`
+text cursor. The `Rigs` and `Settings` lists use the full-width green
+plate from `theme::drawListItem()` for the highlighted row instead.

@@ -226,9 +226,12 @@ active BLE traffic (worst possible moment — mid slider move).
 - **Deep sleep / two-stage idle** — not implemented. Center button is
   wired as the intended `ext0` wake source but no sleep logic exists yet.
 - **NV3030B display driver validation** — see the Display section above.
-- **Profiles / bindings** (requirements v14 §3) — no `Profile` model
-  exists in code yet; `Menu` hardcodes a single fixed device list and
-  fixed bindings.
+- **Shooting configurations** — `src/profile.*` has a compile-time
+  `Profile`/`BindingPreset` model (selection persisted), but the
+  authoritative UI/UX spec (`docs/design/ux-redesign.md`, 2026-08-27)
+  replaces it with a Main/Secondary "configuration" model and a
+  Configurations home screen. Neither the NVS-backed config CRUD nor the
+  new screen flow exists in code yet. Supersedes requirements v14 §3.
 
 ## Bring-up test
 Before wiring buttons/LED/buzzer/battery, verify the display alone: build

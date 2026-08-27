@@ -1,978 +1,811 @@
 #include "menu.h"
-#include "display.h"
+
+#include <Arduino.h>
+#include <NimBLEDevice.h>
+#include <string.h>
+
+#include "menu_internal.h"
 #include "ble_manager.h"
+#include "device_registry.h"
+#include "devices/phone_device.h"
+#include "display.h"
 #include "ota.h"
 #include "led.h"
 #include "battery.h"
-#include "theme.h"
-#include "profile.h"
 #include "settings.h"
-#include "devices/dolly_device.h"
-#include "devices/phone_device.h"
-#include "devices/slider_device.h"
-#include <string.h>
 
 Menu menu;
 
-// Devices available from the device list. Add more here as they're
-// implemented (e.g. a second BLE peripheral for another piece of gear) —
-// they also need registering with bleManager in Menu::begin(). Indices
-// into this table are what Profile::deviceIndices (profile.h) refers to.
-static Device *const kDevices[] = {
-	&sliderDevice,
-	&phoneDevice,
-	&dollyDevice,
-};
-static const int kDeviceCount = sizeof(kDevices) / sizeof(kDevices[0]);
+// Alphabet for the 5-button name editor (mock 19). Latin placeholder.
+static const char *kAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 +-";
+static const int kAlphabetLen = 38;
 
-static void fanOut(Command cmd) {
-	for (int i = 0; i < kDeviceCount; i++) {
-		if (kDevices[i]->isActive()) {
-			kDevices[i]->handleCommand(cmd);
+// ===========================================================================
+// Session lifecycle
+// ===========================================================================
+
+void Menu::launchRig(int rigIndex) {
+	const Rig *r = rigAt(rigIndex);
+	if (!r) return;
+
+	for (int i = 0; i < deviceCount(); i++) {
+		bool member = r->references(i);
+		if (member && !deviceAt(i)->isActive()) deviceAt(i)->activate();
+		else if (!member && deviceAt(i)->isActive()) deviceAt(i)->deactivate();
+	}
+
+	_activeRig = rigIndex;
+	_connectStartedMs = millis();
+	_mainEverReady = false;
+	_takeActive = false;
+	_recordStartedAtMs = 0;
+	_mainMotion = MainMotion::Stopped;
+	_lostSinceMs = 0;
+	_screen = Screen::Connecting;
+}
+
+void Menu::endSession() {
+	if (_takeActive) {
+		fanToPhones(_activeRig, Command::StopRecord);
+		fanToMain(_activeRig, Command::EmergencyStop);
+	}
+	for (int i = 0; i < deviceCount(); i++)
+		if (deviceAt(i)->isActive()) deviceAt(i)->deactivate();
+
+	_activeRig = -1;
+	_takeActive = false;
+	_recordStartedAtMs = 0;
+	_mainMotion = MainMotion::Stopped;
+	_mainEverReady = false;
+	_lostSinceMs = 0;
+	_screen = Screen::Rigs;
+}
+
+void Menu::startTake() {
+	_takeActive = true;
+	_recordStartedAtMs = millis();
+	fanToPhones(_activeRig, Command::Record);
+	const Rig *r = rigAt(_activeRig);
+	Device *m = rigMainOf(_activeRig);
+	if (r && r->takeMode == TakeMode::RecordAndMoveMain && m) {
+		// Program-capable Main (slider): the device owns the trajectory —
+		// send START, never a fake F/B. Legacy motion device: jog forward.
+		if (m->programName()) {
+			fanToMain(_activeRig, Command::StartProgram);
+		} else {
+			fanToMain(_activeRig, Command::MoveForward);
+			_mainMotion = MainMotion::Forward;
 		}
 	}
 }
 
-// Ok on Control always combos move+record the moment a phone and a
-// motion device are both active — not a per-BindingPreset opt-in (see
-// profile.h's comment on why that used to require digging through
-// Menu -> Profiles -> Bindings just to get the basic "press one button,
-// it moves and records" behavior).
-static bool comboModeActive() {
-	return phoneDevice.isActive() && (sliderDevice.isActive() || dollyDevice.isActive());
-}
-
-// Activates every device listed in kProfiles[profileIndex] and
-// deactivates every other registered device. Called on boot (persisted
-// selection) and whenever the user applies a different profile.
-static void applyProfile(int profileIndex) {
-	const Profile &p = kProfiles[profileIndex];
-	for (int i = 0; i < kDeviceCount; i++) {
-		bool shouldBeActive = false;
-		for (int j = 0; j < p.deviceCount; j++) {
-			if (p.deviceIndices[j] == i) {
-				shouldBeActive = true;
-				break;
-			}
-		}
-		Device *dev = kDevices[i];
-		if (shouldBeActive && !dev->isActive()) dev->activate();
-		else if (!shouldBeActive && dev->isActive()) dev->deactivate();
-	}
-}
-
-// Whether each device has actually connected at least once since it was
-// last activated — distinct from isActive()/isConnected() alone. Needed
-// because a device is isActive() && !isConnected() for two very
-// different reasons: it just got turned on and hasn't finished its first
-// connection yet (normal, shown as the DeviceList/Control screens' own
-// "connecting…" pill — not a takeover), or it *was* connected and the
-// link actually dropped (the takeover's real job, per the handoff: "Fires
-// on BLE link loss"). Without this, the takeover fired on every ordinary
-// first connection attempt and blocked the whole UI behind "NO LINK"
-// until the link happened to come up — reported as "screen is stuck
-// showing just Slider, no idea how to use this".
-static bool everConnected[kDeviceCount];
-
-// First device that was connected and has since dropped, if any — the
-// one the connection-lost takeover names. With one registered device
-// active by default today this is at most a single hit, but stays
-// generic for when more are active at once.
-static Device *firstLostDevice() {
-	for (int i = 0; i < kDeviceCount; i++) {
-		if (!kDevices[i]->isActive()) {
-			everConnected[i] = false; // next activation starts its own fresh "connecting…" window
-		} else if (kDevices[i]->isConnected()) {
-			everConnected[i] = true;
+void Menu::stopTake() {
+	_takeActive = false;
+	_recordStartedAtMs = 0;
+	fanToPhones(_activeRig, Command::StopRecord);
+	const Rig *r = rigAt(_activeRig);
+	Device *m = rigMainOf(_activeRig);
+	if (r && r->takeMode == TakeMode::RecordAndMoveMain && m) {
+		if (m->programName()) fanToMain(_activeRig, Command::StopProgram);
+		else {
+			fanToMain(_activeRig, Command::StopMove);
+			_mainMotion = MainMotion::Stopped;
 		}
 	}
-	for (int i = 0; i < kDeviceCount; i++) {
-		if (everConnected[i] && kDevices[i]->isActive() && !kDevices[i]->isConnected()) return kDevices[i];
-	}
-	return nullptr;
 }
 
-// Comma-separated names of every other connected device, for the
-// takeover's footer line (handoff's mock: "телефон, слайдер — ок").
-// Static buffer since drawFooter just wants a const char*.
-static const char *otherLinksFooterText() {
-	static char buf[64];
-	buf[0] = '\0';
-	bool any = false;
-	for (int i = 0; i < kDeviceCount; i++) {
-		if (kDevices[i]->isConnected()) {
-			if (any) strlcat(buf, ", ", sizeof(buf));
-			strlcat(buf, kDevices[i]->name(), sizeof(buf));
-			any = true;
+bool Menu::mainLostTakeoverActive() const {
+	if (_screen != Screen::Control) return false;
+	Device *m = rigMainOf(_activeRig);
+	return m && _mainEverReady && !m->isConnected() && !_takeActive;
+}
+
+// ===========================================================================
+// Editor / text entry
+// ===========================================================================
+
+void Menu::openEditor(int rigIndex) {
+	_editRigIndex = rigIndex;
+	_editRig = rigIndex < 0 ? RigStore::blank() : rigStore.at(rigIndex);
+	_editStep = 0;
+	_editCursor = 0;
+	openTextEntry(TextReturn::EditorName, _editRig.name);
+}
+
+void Menu::saveEditor() {
+	if (_editRigIndex < 0) {
+		int idx = rigStore.add(_editRig);
+		if (idx >= 0) {
+			settings.setRigIndex(idx);
+			_rigCursor = idx;
 		}
+	} else {
+		rigStore.replace(_editRigIndex, _editRig);
+		_rigCursor = _editRigIndex;
 	}
-	if (!any) return "NO OTHER LINKS";
-	strlcat(buf, " OK", sizeof(buf));
-	return buf;
+	_screen = Screen::Rigs;
 }
 
-// Shared connection-summary helper — used for both the header link dot and
-// the top bar color on the Main screen (see docs/screen-design.md, the
-// flat-bar fallback for the spec's per-state vignette).
-static void summarizeLinks(bool &anyConnected, bool &anyConnecting) {
-	anyConnected = false;
-	anyConnecting = false;
-	for (int i = 0; i < kDeviceCount; i++) {
-		if (kDevices[i]->isConnected()) anyConnected = true;
-		else if (kDevices[i]->isActive()) anyConnecting = true;
+void Menu::openTextEntry(TextReturn ret, const char *initial) {
+	_textReturn = ret;
+	memset(_textBuf, 0, sizeof(_textBuf));
+	strncpy(_textBuf, initial ? initial : "", kRigNameMax);
+	_textPos = (int)strlen(_textBuf);
+	if (_textPos >= kRigNameMax) _textPos = kRigNameMax - 1;
+	_textAlpha = 0;
+	_screen = Screen::TextEntry;
+}
+
+void Menu::commitTextEntry() {
+	// Trim trailing spaces.
+	for (int i = (int)strlen(_textBuf) - 1; i >= 0 && _textBuf[i] == ' '; i--) _textBuf[i] = '\0';
+	if (_textBuf[0] == '\0') strcpy(_textBuf, "Rig");
+
+	switch (_textReturn) {
+	case TextReturn::EditorName:
+		strncpy(_editRig.name, _textBuf, kRigNameMax);
+		_editRig.name[kRigNameMax] = '\0';
+		_editStep = 1;
+		_editCursor = 0;
+		_screen = Screen::Editor;
+		break;
+	case TextReturn::RigRename: {
+		Rig r = rigStore.at(_rigCursor);
+		strncpy(r.name, _textBuf, kRigNameMax);
+		r.name[kRigNameMax] = '\0';
+		rigStore.replace(_rigCursor, r);
+		_screen = Screen::Rigs;
+		break;
 	}
-}
-
-// The glass has genuinely rounded active-area corners. The HTML's nominal
-// 13px padding is safe in the middle of the screen but not on the first and
-// last text rows, so header/footer use the measured 28px corner inset.
-static constexpr int16_t kHeaderTextY = 10;
-static constexpr int16_t kHeaderGlyphH = 8;
-static constexpr int16_t kMainRowsTop = 68;
-
-// Draws the compact, divider-free header from the handoff.
-static void drawHeader(Adafruit_GFX &tft, const char *title) {
-	tft.setFont(nullptr);
-	tft.setTextSize(theme::kSizeHint);
-	tft.setTextColor(theme::kTextSecondary);
-	tft.setCursor(theme::kCornerSafeInset, kHeaderTextY);
-	tft.print(title);
-}
-
-// Battery%/connection-dot corner of the header. Split out from drawHeader
-// because both fields change on their own (battery ticks, BLE connects/
-// drops) without any button press — redrawing the *whole* header (or
-// worse, the whole screen) just to reflect that meant a full-screen
-// fillScreen() flash every few seconds even when the user hadn't touched
-// anything. This only wipes its own small corner first.
-static void drawHeaderStatus(Adafruit_GFX &tft, bool anyConnected, bool anyConnecting,
-	                         uint16_t forcedDotColor = 0, bool hideDot = false) {
-	// Erase just this corner — widest realistic content is "100%" + gap +
-	// dot, comfortably under 66px — not the whole header.
-	const int16_t kStatusW = 66;
-	tft.fillRect(tft.width() - kStatusW, kHeaderTextY, kStatusW, kHeaderGlyphH, theme::kBackground);
-
-	char battStr[6];
-	snprintf(battStr, sizeof(battStr), "%d%%", battery.percent());
-	int16_t x1, y1;
-	uint16_t w, h;
-	tft.setFont(nullptr);
-	tft.setTextSize(theme::kSizeHint);
-	tft.getTextBounds(battStr, 0, 0, &x1, &y1, &w, &h);
-	int16_t battX = tft.width() - theme::kCornerSafeInset - (int16_t)w;
-	tft.setTextColor(theme::kTextPrimary);
-	tft.setCursor(battX, kHeaderTextY);
-	tft.print(battStr);
-
-	if (!hideDot) {
-		uint16_t dotColor = forcedDotColor ? forcedDotColor :
-		                    anyConnected ? theme::kOkFill : anyConnecting ? theme::kWarnFill : theme::kTextInactive;
-		int16_t dotR = 3;
-		tft.fillCircle(battX - 5 - dotR, kHeaderTextY + kHeaderGlyphH / 2, dotR, dotColor);
+	case TextReturn::DeviceRename:
+		deviceRegistry.setAlias(_cardDevice, _textBuf);
+		_screen = Screen::DeviceCard;
+		break;
 	}
 }
 
-// Draws (or redraws) one device row's status pill. `erase` wipes a
-// fixed-width box first — needed on a dynamic refresh since e.g. "READY"
-// is wider than "OFF" and the old glyphs would otherwise show through;
-// skipped on a full render where fillScreen() already cleared everything.
-static void drawStatusPill(Adafruit_GFX &tft, Device *dev, int16_t rowY, bool erase) {
-	if (erase) {
-		const int16_t kPillEraseW = 60;
-		const int16_t kPillEraseH = 20;
-		tft.fillRect(tft.width() - theme::kPadH - kPillEraseW, rowY + 4, kPillEraseW, kPillEraseH,
-		             theme::kBackground);
+// ===========================================================================
+// BLE scan (mock 20) — one-shot, only while no session is live
+// ===========================================================================
+
+void Menu::beginScan() {
+	_scanCount = 0;
+	_scanCursor = 0;
+	for (int i = 0; i < deviceCount(); i++)
+		if (deviceAt(i)->isActive()) return; // guarded by the screen; belt and braces
+
+	NimBLEScan *scan = NimBLEDevice::getScan();
+	scan->setActiveScan(true);
+	scan->clearResults();
+	scan->start(6000, false, false); // non-blocking; pollScan() reads results
+	_scanning = true;
+	_scanStartedMs = millis();
+}
+
+void Menu::pollScan() {
+	if (!_scanning) return;
+	NimBLEScan *scan = NimBLEDevice::getScan();
+	if (scan->isScanning() && (millis() - _scanStartedMs) < 7000) return;
+
+	NimBLEScanResults res = scan->getResults();
+	_scanCount = 0;
+	for (int i = 0; i < (int)res.getCount() && _scanCount < kMaxScan; i++) {
+		const NimBLEAdvertisedDevice *d = res.getDevice(i);
+		if (!d->haveName() || d->getName().empty()) continue;
+		strncpy(_scan[_scanCount].name, d->getName().c_str(), sizeof(_scan[0].name) - 1);
+		_scan[_scanCount].name[sizeof(_scan[0].name) - 1] = '\0';
+		_scan[_scanCount].rssi = d->getRSSI();
+		_scanCount++;
 	}
-	const char *statusText = dev->isConnected() ? "READY" : dev->isActive() ? ".." : "OFF";
-	uint16_t pillFill = dev->isConnected() ? theme::kOkFill : dev->isActive() ? theme::kWarnFill : theme::kDivider;
-	uint16_t pillText = dev->isConnected() ? theme::kOkText : dev->isActive() ? theme::kWarnText : theme::kTextInactive;
-	theme::drawPill(tft, statusText, tft.width() - theme::kPadH, rowY + 4, pillFill, pillText);
+	scan->clearResults();
+	_scanning = false;
 }
 
-// Draws the shared footer hint row, bottom-anchored.
-static void drawFooter(Adafruit_GFX &tft, const char *hint, uint16_t color = theme::kTextHint) {
-	tft.setFont(nullptr);
-	tft.setTextSize(theme::kSizeHint);
-	tft.setTextColor(color);
-	int16_t x1, y1;
-	uint16_t w, h;
-	tft.getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
-	int16_t x = (tft.width() - (int16_t)w) / 2;
-	if (x < theme::kCornerSafeInset) x = theme::kCornerSafeInset;
-	tft.setCursor(x, tft.height() - 18);
-	tft.print(hint);
-}
-
-static const char *activeProfileName() {
-	int index = settings.profileIndex();
-	if (index < 0 || index >= kProfileCount) index = 0;
-	return kProfiles[index].name;
-}
-
-static void drawCenteredText(Adafruit_GFX &tft, const char *text, int16_t baselineY) {
-	int16_t x1, y1;
-	uint16_t w, h;
-	tft.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
-	tft.setCursor((tft.width() - (int16_t)w) / 2 - x1, baselineY);
-	tft.print(text);
-}
-
-static void drawThreeItemList(Adafruit_GFX &tft, const char *const *items,
-	                            int count, int selected) {
-	const int visible = count < 3 ? count : 3;
-	int first = selected - 1;
-	if (first < 0) first = 0;
-	if (first > count - visible) first = count - visible;
-	const int16_t itemH = 34;
-	const int16_t totalH = visible * itemH + (visible - 1) * theme::kRowGap;
-	int16_t y = 26 + (190 - totalH) / 2;
-	for (int slot = 0; slot < visible; slot++) {
-		const int index = first + slot;
-		theme::drawListItem(tft, items[index], theme::kPadH, y,
-		                    tft.width() - 2 * theme::kPadH, index == selected);
-		y += itemH + theme::kRowGap;
-	}
-}
-
-// Live-adjustable brightness screen (Settings' SettingsMode::Brightness).
-// `pendingBrightness` is the unsaved 0-255 value being previewed —
-// Menu::handleSettingsButton() already pushed it to the backlight via
-// display.setBrightness() before this draws, so this only needs to show
-// the numeric readout/bar, not touch the backlight itself.
-static void renderBrightnessAdjuster(Adafruit_GFX &tft, int pendingBrightness) {
-	tft.fillScreen(theme::kBackground);
-	tft.setFont(nullptr);
-	tft.setTextSize(theme::kSizeHint);
-	tft.setTextColor(theme::kTextSecondary);
-	tft.setCursor(theme::kCornerSafeInset, theme::kPadV);
-	tft.print("BRIGHTNESS");
-
-	char valStr[8];
-	snprintf(valStr, sizeof(valStr), "%d", (pendingBrightness * 100) / 255);
-	tft.setTextSize(theme::kSizeBigVal);
-	tft.setTextColor(theme::kTextPrimary);
-	int16_t x1, y1;
-	uint16_t w, h;
-	tft.getTextBounds(valStr, 0, 0, &x1, &y1, &w, &h);
-	int16_t y = 90;
-	tft.setCursor((tft.width() - (int16_t)w) / 2, y);
-	tft.print(valStr);
-
-	int16_t barY = y + (int16_t)h + 16;
-	int16_t barW = tft.width() - 2 * theme::kPadH;
-	int16_t barH = 8;
-	tft.drawRect(theme::kPadH, barY, barW, barH, theme::kBorder);
-	int16_t fillW = (barW - 2) * pendingBrightness / 255;
-	tft.fillRect(theme::kPadH + 1, barY + 1, fillW, barH - 2, theme::kOkFill);
-
-	drawFooter(tft, "L/R:ADJUST  OK:SAVE  HOLD-L:CANCEL");
-}
-
-// OTA start confirmation (Settings' SettingsMode::OtaConfirm) — the
-// handoff requires a confirm step before entering OTA since it kills BLE.
-static void renderOtaConfirmScreen(Adafruit_GFX &tft, int selected) {
-	tft.fillScreen(theme::kBackground);
-	tft.setFont(nullptr);
-	tft.setTextSize(theme::kSizeHint);
-	tft.setTextColor(theme::kTextSecondary);
-	tft.setCursor(theme::kCornerSafeInset, theme::kPadV);
-	tft.print("START OTA?");
-
-	static const char *kItems[] = {"YES", "NO"};
-	int16_t y = theme::kPadV + 20;
-	for (int i = 0; i < 2; i++) {
-		int16_t h = theme::drawListItem(tft, kItems[i], theme::kPadH, y, tft.width() - 2 * theme::kPadH,
-		                                 i == selected);
-		y += h + theme::kRowGap;
-	}
-
-	drawFooter(tft, "UP/DN  OK:CONFIRM  HOLD-L:CANCEL");
-}
+// ===========================================================================
+// begin / update
+// ===========================================================================
 
 void Menu::begin() {
-	for (int i = 0; i < kDeviceCount; i++) {
-		bleManager.registerDevice(kDevices[i]);
-	}
-	_screen = Screen::DeviceList;
-	_selected = 0;
-	applyProfile(settings.profileIndex());
+	for (int i = 0; i < deviceCount(); i++) bleManager.registerDevice(deviceAt(i));
+
+	int last = settings.rigIndex();
+	if (last < 0 || last >= rigStore.count()) last = 0;
+	_rigCursor = last;
+
+	if (settings.autostartLastRig() && rigStore.count() > 0) launchRig(last);
+	else _screen = Screen::Rigs;
 }
 
-bool Menu::connectionLostTakeoverActive() const {
-	// Recording keeps the timer on screen; the handoff explicitly gives it
-	// priority over the full-screen lost-link takeover.
-	return !_comboActive && (_screen == Screen::DeviceList || _screen == Screen::Control) &&
-	       firstLostDevice() != nullptr;
-}
+bool Menu::update() {
+	if (_scanning) pollScan();
 
-void Menu::handleSettingsButton(ButtonId id, ButtonEvent ev) {
-	// OTA is exclusive. The handoff leaves only the centre button alive.
-	if (ota.state() != Ota::State::Idle) {
-		if (ev == ButtonEvent::Press && id == ButtonId::Ok) {
-			ota.cancel();
-			_screen = Screen::DeviceList;
+	bool needRender = false;
+	Device *m = rigMainOf(_activeRig);
+	bool mainNow = m && m->isConnected();
+	if (mainNow) _mainEverReady = true;
+
+	if (_screen == Screen::Connecting) {
+		int ready, total;
+		rigPhoneCounts(_activeRig, ready, total);
+		bool goControl = m ? mainNow : (ready > 0);
+		if (goControl) {
+			_screen = Screen::Control;
+			needRender = true;
 		}
-		return;
 	}
 
-	switch (_settingsMode) {
-	case SettingsMode::List:
-		if (ev == ButtonEvent::Press) {
-			switch (id) {
-			case ButtonId::Left:
-				_screen = Screen::DeviceList;
-				break;
-			case ButtonId::Up:
-				_settingsSelected = (_settingsSelected + 2) % 3;
-				break;
-			case ButtonId::Down:
-				_settingsSelected = (_settingsSelected + 1) % 3;
-				break;
-			case ButtonId::Ok:
-				if (_settingsSelected == 0) {
-					_profileSelected = settings.profileIndex();
-					_screen = Screen::ProfileSelect;
-				} else if (_settingsSelected == 1) {
-					_pendingBrightness = settings.brightness();
-					_settingsMode = SettingsMode::Brightness;
-				} else {
-					_otaConfirmSelected = 1; // default to the safe choice, NO
-					_settingsMode = SettingsMode::OtaConfirm;
-				}
-				break;
-			default:
-				break;
-			}
-		} else if (ev == ButtonEvent::LongPress && id == ButtonId::Left) {
-			_screen = Screen::DeviceList;
-		}
-		break;
-
-	case SettingsMode::Brightness:
-		if (ev == ButtonEvent::Press) {
-			const int kStep = 16;
-			const int kMin = 10; // stay visible — 0 would strand the user with no way to see the menu
-			if (id == ButtonId::Left) {
-				_pendingBrightness -= kStep;
-				if (_pendingBrightness < kMin) _pendingBrightness = kMin;
-				display.setBrightness((uint8_t)_pendingBrightness);
-			} else if (id == ButtonId::Right) {
-				_pendingBrightness += kStep;
-				if (_pendingBrightness > 255) _pendingBrightness = 255;
-				display.setBrightness((uint8_t)_pendingBrightness);
-			} else if (id == ButtonId::Ok) {
-				settings.setBrightness((uint8_t)_pendingBrightness);
-				_settingsMode = SettingsMode::List;
-			}
-		} else if (ev == ButtonEvent::LongPress && id == ButtonId::Left) {
-			display.setBrightness(settings.brightness()); // revert the unsaved live preview
-			_settingsMode = SettingsMode::List;
-		}
-		break;
-
-	case SettingsMode::OtaConfirm:
-		if (ev == ButtonEvent::Press) {
-			switch (id) {
-			case ButtonId::Up:
-			case ButtonId::Left:
-				_otaConfirmSelected = 0;
-				break;
-			case ButtonId::Down:
-			case ButtonId::Right:
-				_otaConfirmSelected = 1;
-				break;
-			case ButtonId::Ok:
-				if (_otaConfirmSelected == 0) ota.begin();
-				_settingsMode = SettingsMode::List;
-				break;
-			default:
-				break;
-			}
-		} else if (ev == ButtonEvent::LongPress && id == ButtonId::Left) {
-			_settingsMode = SettingsMode::List;
-		}
-		break;
+	// Main lost mid-take -> immediate broadcast stop + end the take (§4).
+	if (_screen == Screen::Control && m && _mainEverReady && !mainNow && _takeActive) {
+		fanToMain(_activeRig, Command::EmergencyStop);
+		fanToPhones(_activeRig, Command::StopRecord);
+		_takeActive = false;
+		_recordStartedAtMs = 0;
+		_mainMotion = MainMotion::Stopped;
+		needRender = true;
 	}
+
+	bool lost = mainLostTakeoverActive();
+	if (lost != _shownMainLost) needRender = true;
+	if (!lost) _lostSinceMs = 0;
+	else if (_lostSinceMs == 0) _lostSinceMs = millis();
+
+	return needRender;
 }
+
+// ===========================================================================
+// Button routing
+// ===========================================================================
 
 void Menu::handleButton(ButtonId id, ButtonEvent ev) {
 	if (ev == ButtonEvent::None) return;
 
-	if (connectionLostTakeoverActive()) {
-		// The takeover replaces the screen entirely — only Ok does
-		// anything (cosmetically restarts the "reconnecting" message;
-		// BleManager is already retrying regardless, see ble_manager.h).
-		// Everything else is swallowed so it can't silently toggle/move a
-		// device hidden underneath the overlay.
+	// OTA is exclusive: only Ok, to leave the mode.
+	if (ota.state() != Ota::State::Idle) {
 		if (ev == ButtonEvent::Press && id == ButtonId::Ok) {
-			_lostSinceMs = millis();
+			ota.cancel();
+			_screen = Screen::System;
 		}
+		return;
+	}
+
+	if (mainLostTakeoverActive()) {
+		if (ev == ButtonEvent::Press && id == ButtonId::Ok) _lostSinceMs = millis();
+		if (ev == ButtonEvent::LongPress && id == ButtonId::Left) endSession();
 		return;
 	}
 
 	switch (_screen) {
-	case Screen::DeviceList:
-		if (ev == ButtonEvent::Press) {
-			switch (id) {
-			case ButtonId::Up:
-				_selected = (_selected + kDeviceCount - 1) % kDeviceCount;
-				break;
-			case ButtonId::Down:
-				_selected = (_selected + 1) % kDeviceCount;
-				break;
-			case ButtonId::Ok: {
-				Device *dev = kDevices[_selected];
-				if (dev->isActive()) dev->deactivate();
-				else dev->activate();
-				break;
-			}
-			case ButtonId::Right:
-				_screen = Screen::Control;
-				_comboActive = false; // start each visit assuming nothing's running yet
-				break;
-			default:
-				break;
-			}
-		} else if (ev == ButtonEvent::LongPress && (id == ButtonId::Up || id == ButtonId::Ok)) {
-			_screen = Screen::Settings;
-			_settingsMode = SettingsMode::List;
-		}
-		break;
-
-	case Screen::Control: {
-		const BindingPreset &preset = kBindingPresets[settings.bindingPresetIndex()];
-		bool combo = comboModeActive();
-		if (ev == ButtonEvent::Press) {
-			if (id == ButtonId::Ok && combo) {
-				_comboActive = !_comboActive;
-				if (_comboActive) {
-					_recordStartedAtMs = millis();
-					fanOut(Command::MoveForward);
-					fanOut(Command::Record);
-				} else {
-					_recordStartedAtMs = 0;
-					fanOut(Command::StopMove);
-					fanOut(Command::StopRecord);
-				}
-			} else {
-				fanOut(preset.onPress[static_cast<int>(id)]);
-			}
-		} else if (ev == ButtonEvent::LongPress) {
-			if (id == ButtonId::Left) {
-				if (_comboActive) {
-					fanOut(Command::StopMove);
-					fanOut(Command::StopRecord);
-				}
-				_screen = Screen::DeviceList;
-				_comboActive = false;
-				_recordStartedAtMs = 0;
-			} else if (id == ButtonId::Ok && combo) {
-				// Unconditional kill switch regardless of what _comboActive
-				// currently believes — that's just a locally-tracked flag,
-				// not proof either device is actually still doing what we
-				// last told it to (e.g. a command got dropped over BLE).
-				_comboActive = false;
-				_recordStartedAtMs = 0;
-				fanOut(Command::EmergencyStop);
-				fanOut(Command::StopRecord);
-			} else {
-				fanOut(preset.onLongPress[static_cast<int>(id)]);
-			}
-		}
-		break;
-	}
-
-	case Screen::Settings:
-		handleSettingsButton(id, ev);
-		break;
-
-	case Screen::ProfileSelect:
-		if (ev == ButtonEvent::Press) {
-			switch (id) {
-			case ButtonId::Left:
-				_screen = Screen::Settings;
-				_settingsMode = SettingsMode::List;
-				break;
-			case ButtonId::Up:
-				_profileSelected = (_profileSelected + kProfileCount - 1) % kProfileCount;
-				break;
-			case ButtonId::Down:
-				_profileSelected = (_profileSelected + 1) % kProfileCount;
-				break;
-			case ButtonId::Ok:
-				settings.setProfileIndex(_profileSelected);
-				applyProfile(_profileSelected);
-				_screen = Screen::Settings;
-				_settingsMode = SettingsMode::List;
-				break;
-			case ButtonId::Right:
-				_bindingSelected = settings.bindingPresetIndex();
-				_screen = Screen::BindingPresets;
-				break;
-			default:
-				break;
-			}
-		} else if (ev == ButtonEvent::LongPress && id == ButtonId::Left) {
-			_screen = Screen::Settings;
-			_settingsMode = SettingsMode::List;
-		}
-		break;
-
-	case Screen::BindingPresets:
-		if (ev == ButtonEvent::Press) {
-			switch (id) {
-			case ButtonId::Left:
-				_screen = Screen::ProfileSelect;
-				break;
-			case ButtonId::Up:
-				_bindingSelected = (_bindingSelected + kBindingPresetCount - 1) % kBindingPresetCount;
-				break;
-			case ButtonId::Down:
-				_bindingSelected = (_bindingSelected + 1) % kBindingPresetCount;
-				break;
-			case ButtonId::Ok:
-				settings.setBindingPresetIndex(_bindingSelected);
-				_screen = Screen::ProfileSelect;
-				break;
-			default:
-				break;
-			}
-		} else if (ev == ButtonEvent::LongPress && id == ButtonId::Left) {
-			_screen = Screen::ProfileSelect;
-		}
-		break;
+	case Screen::Rigs:         handleRigsButton(id, ev); break;
+	case Screen::RigMenu:      handleRigMenuButton(id, ev); break;
+	case Screen::Editor:       handleEditorButton(id, ev); break;
+	case Screen::TextEntry:    handleTextEntryButton(id, ev); break;
+	case Screen::Connecting:   handleConnectingButton(id, ev); break;
+	case Screen::Control:      handleControlButton(id, ev); break;
+	case Screen::Settings:     handleSettingsButton(id, ev); break;
+	case Screen::Devices:      handleDevicesButton(id, ev); break;
+	case Screen::DeviceCard:   handleDeviceCardButton(id, ev); break;
+	case Screen::Scan:         handleScanButton(id, ev); break;
+	case Screen::ControlPrefs: handleControlPrefsButton(id, ev); break;
+	case Screen::ScreenPrefs:  handleScreenPrefsButton(id, ev); break;
+	case Screen::System:       handleSystemButton(id, ev); break;
 	}
 }
 
-// Connection-lost takeover overrides whichever screen would normally
-// render (see connectionLostTakeoverActive()), but never `_screen`
-// itself — so it "auto-dismisses" for free the moment the device
-// reconnects, resuming exactly the screen the user was on, with nothing
-// extra to track.
-// Both render() and renderDynamic() end with display.flush() — every
-// draw call above only touches the offscreen canvas (see display.h);
-// nothing reaches the physical panel until the composited frame is
-// pushed there in one shot, which is what actually fixes the tearing/
-// jitter that immediate small draws straight to the panel used to cause.
-void Menu::render() {
-	bool lost = connectionLostTakeoverActive();
-	if (lost) {
-		if (_lostSinceMs == 0) _lostSinceMs = millis();
-		renderConnectionLost();
-	} else {
-		_lostSinceMs = 0;
-		switch (_screen) {
-		case Screen::DeviceList: renderDeviceList(); break;
-		case Screen::Control: _comboActive ? renderRecording() : renderControl(); break;
-		case Screen::Settings: renderSettings(); break;
-		case Screen::ProfileSelect: renderProfileSelect(); break;
-		case Screen::BindingPresets: renderBindingPresets(); break;
+// --- Rigs (home) --------------------------------------------------------
+
+void Menu::handleRigsButton(ButtonId id, ButtonEvent ev) {
+	int n = rigStore.count();
+	if (ev == ButtonEvent::Press) {
+		switch (id) {
+		case ButtonId::Up:   if (n) _rigCursor = (_rigCursor + n - 1) % n; break;
+		case ButtonId::Down: if (n) _rigCursor = (_rigCursor + 1) % n; break;
+		case ButtonId::Ok:
+			if (n == 0) { openEditor(-1); }
+			else { settings.setRigIndex(_rigCursor); launchRig(_rigCursor); }
+			break;
+		case ButtonId::Right:
+			if (n) { _rigMenuCursor = 0; _screen = Screen::RigMenu; }
+			break;
+		default: break;
 		}
+	} else if (ev == ButtonEvent::LongPress && id == ButtonId::Left) {
+		_settingsCursor = 0;
+		_screen = Screen::Settings;
 	}
-	display.flush();
 }
 
-void Menu::renderDynamic() {
-	bool lost = connectionLostTakeoverActive();
-	if (lost != (_lostSinceMs != 0)) {
-		// Transition detected outside a button press (BLE dropped or
-		// recovered on its own, between ticks) — needs a full redraw
-		// either way: entering the takeover replaces the whole screen,
-		// leaving it must restore whatever fillScreen()'d content the
-		// takeover was covering. render() handles both, and already
-		// flushes — don't do it twice.
-		render();
+// --- Rig menu (mock 18): Edit / Duplicate / Rename / Delete -------------
+
+void Menu::handleRigMenuButton(ButtonId id, ButtonEvent ev) {
+	if (ev == ButtonEvent::Press) {
+		switch (id) {
+		case ButtonId::Up:   _rigMenuCursor = (_rigMenuCursor + 3) % 4; break;
+		case ButtonId::Down: _rigMenuCursor = (_rigMenuCursor + 1) % 4; break;
+		case ButtonId::Left: _screen = Screen::Rigs; break;
+		case ButtonId::Ok:
+			switch (_rigMenuCursor) {
+			case 0: openEditor(_rigCursor); break;
+			case 1: {
+				int idx = rigStore.duplicate(_rigCursor);
+				if (idx >= 0) _rigCursor = idx;
+				_screen = Screen::Rigs;
+				break;
+			}
+			case 2: openTextEntry(TextReturn::RigRename, rigStore.at(_rigCursor).name); break;
+			case 3:
+				rigStore.remove(_rigCursor);
+				if (_rigCursor >= rigStore.count()) _rigCursor = rigStore.count() - 1;
+				if (_rigCursor < 0) _rigCursor = 0;
+				_screen = Screen::Rigs;
+				break;
+			}
+			break;
+		default: break;
+		}
+	} else if (ev == ButtonEvent::LongPress && id == ButtonId::Left) {
+		_screen = Screen::Rigs;
+	}
+}
+
+// --- Editor (mock 11-13): step 1 Main, 2 Secondary, 3 TakeMode ---------
+// Step 0 (name) is handled by TextEntry, which advances to step 1.
+
+void Menu::handleEditorButton(ButtonId id, ButtonEvent ev) {
+	// Motion devices are Main candidates; index -1 == "None" is the last row.
+	auto motionCount = []() {
+		int n = 0;
+		for (int i = 0; i < deviceCount(); i++)
+			if (deviceAt(i)->kind() == DeviceKind::Motion) n++;
+		return n;
+	};
+	auto motionAt = [](int k) -> int {
+		int n = 0;
+		for (int i = 0; i < deviceCount(); i++)
+			if (deviceAt(i)->kind() == DeviceKind::Motion) {
+				if (n == k) return i;
+				n++;
+			}
+		return -1;
+	};
+
+	if (ev == ButtonEvent::LongPress && id == ButtonId::Left) {
+		if (_editStep == 1) { openTextEntry(TextReturn::EditorName, _editRig.name); }
+		else if (_editStep > 1) { _editStep--; _editCursor = 0; }
+		else { _screen = Screen::Rigs; }
 		return;
 	}
-	if (lost) {
-		renderConnectionLostDynamic();
-	} else {
-		switch (_screen) {
-		case Screen::DeviceList: renderDeviceListDynamic(); break;
-		case Screen::Control: _comboActive ? renderRecordingDynamic() : renderControlDynamic(); break;
-		case Screen::Settings:
-		case Screen::ProfileSelect:
-		case Screen::BindingPresets:
-			break; // everything on these only changes on a button press (dirty), already a full render
+	if (ev != ButtonEvent::Press) return;
+
+	if (_editStep == 1) { // Main: [motion devices..., None]
+		int rows = motionCount() + 1;
+		if (id == ButtonId::Up) _editCursor = (_editCursor + rows - 1) % rows;
+		else if (id == ButtonId::Down) _editCursor = (_editCursor + 1) % rows;
+		else if (id == ButtonId::Ok) {
+			int mainIdx = _editCursor < motionCount() ? motionAt(_editCursor) : -1;
+			_editRig.mainIndex = (int8_t)mainIdx;
+			// Drop any Secondary slot that now collides with Main.
+			int w = 0;
+			for (int i = 0; i < _editRig.secondaryCount; i++)
+				if (_editRig.secondary[i] != mainIdx) _editRig.secondary[w++] = _editRig.secondary[i];
+			_editRig.secondaryCount = (int8_t)w;
+			_editStep = 2;
+			_editCursor = 0;
+		}
+	} else if (_editStep == 2) { // Secondary: checkbox list of Camera devices
+		int rows = 0, cams[8] = {0};
+		for (int i = 0; i < deviceCount(); i++)
+			if (deviceAt(i)->kind() == DeviceKind::Camera) cams[rows++] = i;
+		if (rows == 0) { if (id == ButtonId::Ok) { _editStep = 3; _editCursor = 0; } return; }
+		if (id == ButtonId::Up) _editCursor = (_editCursor + rows - 1) % rows;
+		else if (id == ButtonId::Down) _editCursor = (_editCursor + 1) % rows;
+		else if (id == ButtonId::Right) {
+			int dev = cams[_editCursor];
+			if (_editRig.hasSecondary(dev)) {
+				int w = 0;
+				for (int i = 0; i < _editRig.secondaryCount; i++)
+					if (_editRig.secondary[i] != dev) _editRig.secondary[w++] = _editRig.secondary[i];
+				_editRig.secondaryCount = (int8_t)w;
+			} else if (_editRig.secondaryCount < kMaxSecondaryPerRig) {
+				_editRig.secondary[_editRig.secondaryCount++] = (int8_t)dev;
+			}
+		} else if (id == ButtonId::Ok) {
+			_editStep = 3;
+			_editCursor = 0;
+		}
+	} else if (_editStep == 3) { // TakeMode
+		if (id == ButtonId::Up || id == ButtonId::Down) _editCursor ^= 1;
+		else if (id == ButtonId::Ok) {
+			_editRig.takeMode = _editCursor == 0 ? TakeMode::RecordOnly : TakeMode::RecordAndMoveMain;
+			saveEditor();
 		}
 	}
-	display.flush();
 }
 
-// "Main" screen from docs/screen-design.md: one row per registered device
-// with an identity-colored icon chip + name + a state-colored status pill.
-void Menu::renderDeviceList() {
-	Adafruit_GFX &tft = display.canvas();
-	tft.fillScreen(theme::kBackground);
+// --- Text entry (mock 19) ---------------------------------------------
 
-	bool anyConnected, anyConnecting;
-	summarizeLinks(anyConnected, anyConnecting);
-	uint16_t barColor = anyConnecting ? theme::kWarnFill : theme::kPhoneFill;
-	theme::drawTopBar(tft, barColor);
+void Menu::handleTextEntryButton(ButtonId id, ButtonEvent ev) {
+	int len = (int)strlen(_textBuf);
 
-	drawHeader(tft, activeProfileName());
-	drawHeaderStatus(tft, anyConnected, anyConnecting);
-
-	const int16_t rowH = theme::kIconChip;
-	const int16_t rowGap = 9;
-	for (int i = 0; i < kDeviceCount; i++) {
-		Device *dev = kDevices[i];
-		int16_t rowY = kMainRowsTop + i * (rowH + rowGap);
-
-		if (_screen == Screen::DeviceList && i == _selected) {
-			tft.fillRect(0, rowY, theme::kAccentBarWidth, rowH, dev->identityColor565());
+	if (ev == ButtonEvent::LongPress) {
+		if (id == ButtonId::Right) { // backspace
+			if (len > 0) {
+				_textBuf[len - 1] = '\0';
+				if (_textPos > 0) _textPos--;
+			}
+		} else if (id == ButtonId::Left) {
+			if (_textReturn == TextReturn::EditorName && _editRigIndex < 0 && _editStep == 0)
+				_screen = Screen::Rigs;
+			else if (_textReturn == TextReturn::EditorName)
+				_screen = Screen::Rigs;
+			else if (_textReturn == TextReturn::RigRename)
+				_screen = Screen::RigMenu;
+			else
+				_screen = Screen::DeviceCard;
 		}
-
-		int16_t chipX = theme::kPadH + theme::kAccentBarWidth + 4;
-		theme::drawIconChip(tft, chipX, rowY, dev->abbrev(), dev->identityColor565(), dev->identityTextColor565());
-
-		tft.setFont(&FreeSansBold9pt7b);
-		tft.setTextSize(1);
-		tft.setTextColor(theme::kTextPrimary);
-		int16_t x1, y1;
-		uint16_t w, h;
-		tft.getTextBounds(dev->name(), 0, 0, &x1, &y1, &w, &h);
-		tft.setCursor(chipX + theme::kIconChip + 9, rowY + (rowH - (int16_t)h) / 2 - y1);
-		tft.print(dev->name());
-		tft.setFont(nullptr);
-
-		drawStatusPill(tft, dev, rowY, /*erase=*/false);
+		return;
 	}
+	if (ev != ButtonEvent::Press) return;
 
-	drawFooter(tft, _screen == Screen::Control ? "OK:REC  D-PAD:MOTION  HOLD-L:BACK" :
-	                                           "OK:DEVICE  RIGHT:CTRL  HOLD-UP:MENU");
-}
+	// Ensure the buffer covers _textPos so we can edit "past the end".
+	while ((int)strlen(_textBuf) <= _textPos && (int)strlen(_textBuf) < kRigNameMax) {
+		int l = (int)strlen(_textBuf);
+		_textBuf[l] = ' ';
+		_textBuf[l + 1] = '\0';
+	}
+	char cur = _textBuf[_textPos];
+	int ai = 0;
+	for (int i = 0; i < kAlphabetLen; i++)
+		if (kAlphabet[i] == cur) { ai = i; break; }
 
-// Cheap refresh for the DeviceList screen's fields that can change without
-// a button press (battery ticking, BLE connecting/dropping) — no
-// fillScreen(), just the small regions that actually need new pixels. See
-// drawHeaderStatus/drawStatusPill for what each one erases before redraw.
-void Menu::renderDeviceListDynamic() {
-	Adafruit_GFX &tft = display.canvas();
-
-	bool anyConnected, anyConnecting;
-	summarizeLinks(anyConnected, anyConnecting);
-	drawHeaderStatus(tft, anyConnected, anyConnecting);
-
-	const int16_t rowH = theme::kIconChip;
-	const int16_t rowGap = 9;
-	for (int i = 0; i < kDeviceCount; i++) {
-		int16_t rowY = kMainRowsTop + i * (rowH + rowGap);
-		drawStatusPill(tft, kDevices[i], rowY, /*erase=*/true);
+	switch (id) {
+	case ButtonId::Up:
+		ai = (ai + 1) % kAlphabetLen;
+		_textBuf[_textPos] = kAlphabet[ai];
+		break;
+	case ButtonId::Down:
+		ai = (ai + kAlphabetLen - 1) % kAlphabetLen;
+		_textBuf[_textPos] = kAlphabet[ai];
+		break;
+	case ButtonId::Left:
+		if (_textPos > 0) _textPos--;
+		break;
+	case ButtonId::Right:
+		if (_textPos < kRigNameMax - 1) _textPos++;
+		break;
+	case ButtonId::Ok:
+		commitTextEntry();
+		break;
+	default:
+		break;
 	}
 }
 
-void Menu::renderRecording() {
-	Adafruit_GFX &tft = display.canvas();
-	tft.fillScreen(theme::kBackground);
-	theme::drawTopBar(tft, theme::kRecordFill);
-	tft.drawRect(0, 0, tft.width(), tft.height(), theme::kRecordFill);
+// --- Connecting --------------------------------------------------------
 
-	bool anyConnected, anyConnecting;
-	summarizeLinks(anyConnected, anyConnecting);
-	drawHeader(tft, activeProfileName());
-	drawHeaderStatus(tft, anyConnected, anyConnecting, theme::kRecordFill);
+void Menu::handleConnectingButton(ButtonId id, ButtonEvent ev) {
+	if (ev == ButtonEvent::Press && id == ButtonId::Ok) _connectStartedMs = millis();
+	else if (ev == ButtonEvent::LongPress && id == ButtonId::Left) endSession();
+}
 
-	const char *recordBadge = "REC";
-	tft.setFont(nullptr);
-	tft.setTextSize(theme::kSizeHint);
-	int16_t x1, y1;
-	uint16_t w, h;
-	tft.getTextBounds(recordBadge, 0, 0, &x1, &y1, &w, &h);
-	theme::drawPill(tft, recordBadge, (tft.width() + (int16_t)w + 18) / 2,
-	                48, theme::kRecordFill, theme::kRecordText);
+// --- Control ----------------------------------------------------------
 
-	uint32_t elapsed = _recordStartedAtMs ? (millis() - _recordStartedAtMs) / 1000 : 0;
-	char timer[12];
-	if (elapsed < 3600) {
-		snprintf(timer, sizeof(timer), "%02lu:%02lu",
-		         static_cast<unsigned long>(elapsed / 60),
-		         static_cast<unsigned long>(elapsed % 60));
-		tft.setFont(&FreeMonoBold24pt7b);
-	} else {
-		snprintf(timer, sizeof(timer), "%lu:%02lu:%02lu",
-		         static_cast<unsigned long>(elapsed / 3600),
-		         static_cast<unsigned long>((elapsed / 60) % 60),
-		         static_cast<unsigned long>(elapsed % 60));
-		tft.setFont(&FreeMonoBold18pt7b);
+void Menu::handleControlButton(ButtonId id, ButtonEvent ev) {
+	Device *m = rigMainOf(_activeRig);
+	int ready, total;
+	rigPhoneCounts(_activeRig, ready, total);
+
+	if (ev == ButtonEvent::LongPress) {
+		if (id == ButtonId::Ok) {
+			// In a fault state, long-Ok clears the error instead of E-Stopping.
+			if (m && m->inFault() && !_takeActive) {
+				m->handleCommand(Command::ResetFault);
+				return;
+			}
+			_takeActive = false;
+			_recordStartedAtMs = 0;
+			_mainMotion = MainMotion::Stopped;
+			fanToMain(_activeRig, Command::EmergencyStop);
+			fanToPhones(_activeRig, Command::StopRecord);
+			return;
+		}
+		if (id == ButtonId::Left) { endSession(); return; }
+		if (id == ButtonId::Right && m && m->supportsHome() && !_takeActive) {
+			m->handleCommand(Command::Home);
+			_mainMotion = MainMotion::Stopped;
+			return;
+		}
+		return;
 	}
-	tft.setTextSize(1);
-	tft.setTextColor(theme::kRecordText);
-	drawCenteredText(tft, timer, 125);
-	tft.setFont(nullptr);
+	if (ev != ButtonEvent::Press) return;
 
-	const bool motionActive = sliderDevice.isActive() || dollyDevice.isActive();
-	if (motionActive) {
-		const char *motionBadge = "MOTION";
-		tft.setTextSize(theme::kSizeHint);
-		tft.getTextBounds(motionBadge, 0, 0, &x1, &y1, &w, &h);
-		theme::drawPill(tft, motionBadge, (tft.width() + (int16_t)w + 18) / 2,
-		                151, theme::kOkFill, theme::kOkText);
-	}
-
-	drawFooter(tft, "OK - STOP", theme::kRecordFill);
-}
-
-void Menu::renderRecordingDynamic() {
-	// The framebuffer means a complete recomposition is still presented as
-	// one tear-free frame, and keeps the timer, battery and link state atomic.
-	renderRecording();
-}
-
-void Menu::renderControl() {
-	renderDeviceList();
-}
-
-// Cheap refresh for Control: battery/link corner plus each active device's
-// telemetry line (position/speed tick continuously while moving). Which
-// devices are active can't change while this screen is showing — that's
-// only ever toggled from DeviceList — so the same devices/line count as
-// the last full render() still apply; only their contents need updating.
-// Each line is erased first since printf'd numbers can shrink (e.g. digit
-// count dropping) and leave stale glyphs behind otherwise.
-void Menu::renderControlDynamic() {
-	renderDeviceListDynamic();
-}
-
-// Full-screen takeover for a lost link (docs/design's "Main / connection
-// lost" screen #3) — see connectionLostTakeoverActive()/render() for when
-// this replaces the normal DeviceList/Control content.
-void Menu::renderConnectionLost() {
-	Adafruit_GFX &tft = display.canvas();
-	tft.fillScreen(theme::kBackground);
-	theme::drawTopBar(tft, theme::kWarnFill);
-	tft.drawRect(0, 0, tft.width(), tft.height(), theme::kWarnFill);
-	drawHeader(tft, activeProfileName());
-	drawHeaderStatus(tft, false, false, 0, true);
-
-	Device *lost = firstLostDevice();
-	if (!lost) return; // render() only calls this when connectionLostTakeoverActive()
-
-	const int16_t chipSize = 32;
-	int16_t y = 54;
-	int16_t chipX = (tft.width() - chipSize) / 2;
-	theme::drawIconChip(tft, chipX, y, lost->abbrev(), lost->identityColor565(),
-	                    lost->identityTextColor565(), chipSize, 9);
-	y += chipSize + 9;
-
-	int16_t x1, y1;
-	uint16_t w, h;
-	tft.setFont(&FreeSansBold12pt7b);
-	tft.setTextSize(1);
-	tft.setTextColor(theme::kTextPrimary);
-	tft.getTextBounds(lost->name(), 0, 0, &x1, &y1, &w, &h);
-	tft.setCursor((tft.width() - (int16_t)w) / 2 - x1, y - y1);
-	tft.print(lost->name());
-	y += (int16_t)h + 7;
-
-	tft.setFont(nullptr);
-	tft.setTextSize(theme::kSizeHint);
-	const char *badge = "NO LINK";
-	tft.getTextBounds(badge, 0, 0, &x1, &y1, &w, &h);
-	int16_t padX = 9, padY = 3;
-	int16_t pillW = (int16_t)w + padX * 2, pillH = (int16_t)h + padY * 2;
-	int16_t pillX = (tft.width() - pillW) / 2;
-	tft.fillRoundRect(pillX, y, pillW, pillH, theme::kPillRadiusY, theme::kWarnFill);
-	tft.setTextColor(theme::kWarnText);
-	tft.setCursor(pillX + padX, y + padY);
-	tft.print(badge);
-	y += pillH + 7;
-
-	bool retryFailed = (millis() - _lostSinceMs) > 30000;
-	const char *msg = retryFailed ? "FAILED - OK:RETRY" : "RECONNECTING...";
-	tft.setTextColor(theme::kTextHint);
-	tft.getTextBounds(msg, 0, 0, &x1, &y1, &w, &h);
-	tft.setCursor((tft.width() - (int16_t)w) / 2, y);
-	tft.print(msg);
-
-	drawFooter(tft, otherLinksFooterText());
-}
-
-// Cheap refresh while the takeover is already showing: battery/link
-// corner plus the reconnect-status line, which is the only thing that
-// changes tick to tick (the 30s "failed" message swap). Recomputes the
-// same y the full render used rather than caching it, mirroring how
-// renderControlDynamic() re-derives its line positions.
-void Menu::renderConnectionLostDynamic() {
-	renderConnectionLost();
-}
-
-// Design's "Profile select" screen — picks which Profile (profile.h) is
-// active. Right drills into BindingPresets for the highlighted profile.
-void Menu::renderProfileSelect() {
-	Adafruit_GFX &tft = display.canvas();
-	tft.fillScreen(theme::kBackground);
-
-	tft.setTextSize(theme::kSizeHint);
-	tft.setTextColor(theme::kTextSecondary);
-	tft.setCursor(theme::kCornerSafeInset, theme::kPadV);
-	tft.print("PROFILES");
-
-	const int visible = kProfileCount < 3 ? kProfileCount : 3;
-	int first = _profileSelected - 1;
-	if (first < 0) first = 0;
-	if (first > kProfileCount - visible) first = kProfileCount - visible;
-	const int16_t itemH = 34;
-	int16_t y = 26 + (190 - (visible * itemH + (visible - 1) * theme::kRowGap)) / 2;
-	for (int slot = 0; slot < visible; slot++) {
-		int i = first + slot;
-		theme::drawListItem(tft, kProfiles[i].name, theme::kPadH, y,
-		                    tft.width() - 2 * theme::kPadH, i == _profileSelected);
-		y += itemH + theme::kRowGap;
+	if (id == ButtonId::Ok) {
+		if (_takeActive) stopTake();
+		else if (ready > 0) startTake();
+		else if (m && m->programName()) {
+			// No camera to record: Ok is the program's explicit START/STOP.
+			if (m->programRunning()) m->handleCommand(Command::StopProgram);
+			else if (!m->inFault() && m->canExecuteCommand(Command::StartProgram))
+				m->handleCommand(Command::StartProgram);
+		}
+		return;
 	}
 
-	drawFooter(tft, "UP/DN:SELECT  OK:OPEN  LEFT:BACK");
-}
+	if (!m) {
+		// Camera-only rig: Right cycles to the next bonded phone (quick
+		// switch — not simultaneous). Everything else idle.
+		if (id == ButtonId::Right && !_takeActive) phoneDevice.switchToNextPhone();
+		return;
+	}
 
-// Design's "Binding presets" screen — picks the D-pad->Command mapping
-// Control uses (see profile.h's BindingPreset and the copy-deviation note
-// in the plan this was built from: real, testable presets today rather
-// than the mock's device-set-flavored sample names, which would be
-// no-ops with only one registered Device).
-void Menu::renderBindingPresets() {
-	Adafruit_GFX &tft = display.canvas();
-	tft.fillScreen(theme::kBackground);
-
-	tft.setTextSize(theme::kSizeHint);
-	tft.setTextColor(theme::kTextSecondary);
-	tft.setCursor(theme::kCornerSafeInset, theme::kPadV);
-	tft.print("BINDINGS");
-
-	const char *items[3] = {
-		kBindingPresets[0].name,
-		kBindingPresets[1].name,
-		kBindingPresets[2].name,
+	const int cap = settings.maxSpeedLevel();
+	auto speed = [&](bool up) {
+		if (up) {
+			if (m->speedLevel() == 0 || m->speedLevel() < cap) m->handleCommand(Command::SpeedUp);
+		} else {
+			m->handleCommand(Command::SpeedDown);
+		}
 	};
-	drawThreeItemList(tft, items, kBindingPresetCount, _bindingSelected);
 
-	drawFooter(tft, "UP/DN:PRESET  OK:APPLY  LEFT:BACK");
+	// Program-driven Main (slider): the main screen has no manual jog — the
+	// slider owns the trajectory (docs/11_program_api.md). All four arrows
+	// adjust the program's speed. Manual F/B lives on a future Advanced
+	// screen.
+	if (m->programName()) {
+		if (id == ButtonId::Up || id == ButtonId::Right) speed(true);
+		else if (id == ButtonId::Down || id == ButtonId::Left) speed(false);
+		return;
+	}
+
+	// Legacy motion device (dolly): jog + speed per the axis-binding setting.
+	const bool speedUpDown = settings.axisBinding() == AxisBinding::SpeedUpDown;
+	auto move = [&](MainMotion dir, Command go) {
+		if (_mainMotion == dir) {
+			m->handleCommand(Command::StopMove);
+			_mainMotion = MainMotion::Stopped;
+		} else if (m->canExecuteCommand(go)) {
+			m->handleCommand(go);
+			_mainMotion = dir;
+		} else {
+			_mainMotion = MainMotion::Stopped;
+		}
+	};
+
+	switch (id) {
+	case ButtonId::Up:    speedUpDown ? speed(true)  : (void)move(MainMotion::Forward, Command::MoveForward); break;
+	case ButtonId::Down:  speedUpDown ? speed(false) : (void)move(MainMotion::Backward, Command::MoveBackward); break;
+	case ButtonId::Left:  speedUpDown ? (void)move(MainMotion::Backward, Command::MoveBackward) : speed(false); break;
+	case ButtonId::Right: speedUpDown ? (void)move(MainMotion::Forward, Command::MoveForward) : speed(true); break;
+	default: break;
+	}
 }
 
-// Three sub-states: the 3-item list, the inline brightness adjuster, and
-// the OTA confirm prompt (see SettingsMode) — plus the pre-existing
-// OTA-active passthrough (design's screen #7), unchanged.
-void Menu::renderSettings() {
-	Adafruit_GFX &tft = display.canvas();
+// --- Settings (mock 14) ----------------------------------------------
 
-	if (ota.state() != Ota::State::Idle) {
-		// OTA active — design's screen #7 ("OTA mode, exclusive").
-		tft.fillScreen(theme::kBackground);
-		tft.drawRect(0, 0, tft.width(), tft.height(), theme::kWarnFill);
-		tft.fillRoundRect(theme::kCornerSafeInset, tft.height() - 5,
-		                  tft.width() - 2 * theme::kCornerSafeInset, 3, 2, theme::kWarnFill);
-
-		tft.setFont(nullptr);
-		tft.setTextSize(theme::kSizeHint);
-		tft.setTextColor(theme::kTextHint);
-		tft.setCursor(theme::kCornerSafeInset, kHeaderTextY);
-		tft.print("BLE: OFF");
-
-		const char *wifiLabel = "WIFI: ON";
-		int16_t x1, y1;
-		uint16_t w, h;
-		tft.getTextBounds(wifiLabel, 0, 0, &x1, &y1, &w, &h);
-		tft.setTextColor(theme::kWarnFill);
-		tft.setCursor(tft.width() - theme::kCornerSafeInset - (int16_t)w, kHeaderTextY);
-		tft.print(wifiLabel);
-
-		int16_t contentY = 81;
-		tft.setTextSize(theme::kSizeBody);
-		tft.setTextColor(theme::kTextPrimary);
-		drawCenteredText(tft, "OTA MODE", contentY);
-		contentY += 16;
-
-		switch (ota.state()) {
-		case Ota::State::Connecting:
-			tft.setTextSize(theme::kSizeHint);
-			tft.setTextColor(theme::kTextSecondary);
-			drawCenteredText(tft, "Connecting WiFi...", contentY + 20);
+void Menu::handleSettingsButton(ButtonId id, ButtonEvent ev) {
+	if (ev == ButtonEvent::Press) {
+		switch (id) {
+		case ButtonId::Up:   _settingsCursor = (_settingsCursor + 4) % 5; break;
+		case ButtonId::Down: _settingsCursor = (_settingsCursor + 1) % 5; break;
+		case ButtonId::Left: _screen = Screen::Rigs; break;
+		case ButtonId::Ok:
+			switch (_settingsCursor) {
+			case 0: _screen = Screen::Rigs; break;
+			case 1: _devicesCursor = 0; _screen = Screen::Devices; break;
+			case 2: _ctrlPrefCursor = 0; _screen = Screen::ControlPrefs; break;
+			case 3: _pendingBrightness = settings.brightness(); _screen = Screen::ScreenPrefs; break;
+			case 4: _sysCursor = 0; _sysConfirm = SysConfirm::None; _screen = Screen::System; break;
+			}
 			break;
-		case Ota::State::WaitingForUpload:
-		case Ota::State::Uploading:
-			tft.setFont(&FreeMonoBold18pt7b);
-			tft.setTextSize(1);
-			tft.setTextColor(theme::kWarnFill);
-			drawCenteredText(tft, ota.ip(), contentY + 34);
-			contentY += 48;
-			tft.setFont(nullptr);
-			tft.setTextSize(theme::kSizeHint);
-			tft.setTextColor(theme::kTextSecondary);
-			drawCenteredText(tft,
-			                 ota.state() == Ota::State::Uploading ? "Uploading..." : "Waiting for connection...",
-			                 contentY);
+		default: break;
+		}
+	} else if (ev == ButtonEvent::LongPress && id == ButtonId::Left) {
+		_screen = Screen::Rigs;
+	}
+}
+
+// --- Devices registry (mock 15) ------------------------------------
+
+void Menu::handleDevicesButton(ButtonId id, ButtonEvent ev) {
+	int n = deviceCount();
+	if (ev == ButtonEvent::Press) {
+		switch (id) {
+		case ButtonId::Up:   _devicesCursor = (_devicesCursor + n - 1) % n; break;
+		case ButtonId::Down: _devicesCursor = (_devicesCursor + 1) % n; break;
+		case ButtonId::Left: _screen = Screen::Settings; break;
+		case ButtonId::Right:
+			_cardDevice = _devicesCursor;
+			_cardCursor = 0;
+			_screen = Screen::DeviceCard;
 			break;
-		case Ota::State::Failed:
-			tft.setTextSize(theme::kSizeHint);
-			tft.setTextColor(theme::kWarnFill);
-			drawCenteredText(tft, "Failed / timeout", contentY + 24);
+		case ButtonId::Ok: // "add" -> the scan screen
+			_scanCount = 0;
+			_scanCursor = 0;
+			_screen = Screen::Scan;
+			break;
+		default: break;
+		}
+	} else if (ev == ButtonEvent::LongPress && id == ButtonId::Left) {
+		for (int i = 0; i < deviceCount(); i++)
+			if (deviceAt(i)->isActive()) deviceAt(i)->deactivate();
+		_screen = Screen::Settings;
+	}
+}
+
+// --- Device card (mock 21) ---------------------------------------
+
+void Menu::handleDeviceCardButton(ButtonId id, ButtonEvent ev) {
+	Device *d = deviceAt(_cardDevice);
+	// Actions: 0 test link, 1 rename, [2 switch phone] when >1 phone bonded.
+	const bool canSwitch = d && d->kind() == DeviceKind::Camera && phoneDevice.bondedPhoneCount() > 1;
+	const int acts = canSwitch ? 3 : 2;
+
+	if (ev == ButtonEvent::Press) {
+		switch (id) {
+		case ButtonId::Up:   _cardCursor = (_cardCursor + acts - 1) % acts; break;
+		case ButtonId::Down: _cardCursor = (_cardCursor + 1) % acts; break;
+		case ButtonId::Left:
+			if (d && d->isActive()) d->deactivate();
+			_screen = Screen::Devices;
+			break;
+		case ButtonId::Ok:
+			if (_cardCursor == 0) {
+				if (d) d->isActive() ? d->deactivate() : d->activate();
+			} else if (_cardCursor == 1) {
+				openTextEntry(TextReturn::DeviceRename, deviceRegistry.alias(_cardDevice));
+			} else {
+				phoneDevice.switchToNextPhone();
+			}
 			break;
 		default:
 			break;
 		}
-
-		// Amber "functions unavailable" block, spec's own attention element —
-		// anchored just above the footer.
-		int16_t blockY = tft.height() - 40;
-		tft.fillRoundRect(theme::kPadH, blockY, tft.width() - 2 * theme::kPadH, 18, 6, theme::kWarnFill);
-		tft.setTextSize(theme::kSizeHint);
-		tft.setTextColor(theme::kWarnText);
-		tft.setCursor(theme::kPadH + 6, blockY + 5);
-		tft.print("FUNCTIONS DISABLED");
-
-		drawFooter(tft, "OK - EXIT");
-		return;
+	} else if (ev == ButtonEvent::LongPress && id == ButtonId::Left) {
+		if (d && d->isActive()) d->deactivate();
+		_screen = Screen::Devices;
 	}
-
-	if (_settingsMode == SettingsMode::Brightness) {
-		renderBrightnessAdjuster(tft, _pendingBrightness);
-		return;
-	}
-	if (_settingsMode == SettingsMode::OtaConfirm) {
-		renderOtaConfirmScreen(tft, _otaConfirmSelected);
-		return;
-	}
-
-	// List mode — the design's "МЕНЮ" screen (Latin placeholder copy, see
-	// docs/screen-design.md's Cyrillic-text note).
-	tft.fillScreen(theme::kBackground);
-	tft.setTextSize(theme::kSizeHint);
-	tft.setTextColor(theme::kTextSecondary);
-	tft.setCursor(theme::kCornerSafeInset, theme::kPadV);
-	tft.print("MENU");
-
-	static const char *kItems[] = {"PROFILES", "BRIGHTNESS", "OTA UPDATE"};
-	drawThreeItemList(tft, kItems, 3, _settingsSelected);
-	const int16_t trackX = tft.width() - theme::kPadH - 12 - 56;
-	const int16_t trackY = 104 + 15;
-	tft.fillRoundRect(trackX, trackY, 56, 4, 2, theme::kDivider);
-	int16_t trackFill = 56 * settings.brightness() / 255;
-	tft.fillRoundRect(trackX, trackY, trackFill, 4, 2,
-	                  _settingsSelected == 1 ? theme::kOkText : theme::kTextInactive);
-
-	drawFooter(tft, "UP/DN  OK:OPEN  LEFT:BACK");
 }
 
+// --- Scan (mock 20) ---------------------------------------------
+
+void Menu::handleScanButton(ButtonId id, ButtonEvent ev) {
+	if (ev == ButtonEvent::Press) {
+		switch (id) {
+		case ButtonId::Up:   if (_scanCount) _scanCursor = (_scanCursor + _scanCount - 1) % _scanCount; break;
+		case ButtonId::Down: if (_scanCount) _scanCursor = (_scanCursor + 1) % _scanCount; break;
+		case ButtonId::Left: _screen = Screen::Devices; break;
+		case ButtonId::Ok:
+			if (!_scanning && _scanCount == 0) beginScan();
+			// Registering a scanned peer needs a matching built-in driver
+			// (dynamic drivers are a later phase) — no-op otherwise.
+			break;
+		default: break;
+		}
+	} else if (ev == ButtonEvent::LongPress && id == ButtonId::Left) {
+		_screen = Screen::Devices;
+	}
+}
+
+// --- Control prefs (mock 22) ----------------------------------
+
+void Menu::handleControlPrefsButton(ButtonId id, ButtonEvent ev) {
+	if (ev == ButtonEvent::Press) {
+		switch (id) {
+		case ButtonId::Up:   _ctrlPrefCursor = (_ctrlPrefCursor + 3) % 4; break;
+		case ButtonId::Down: _ctrlPrefCursor = (_ctrlPrefCursor + 1) % 4; break;
+		case ButtonId::Left:
+		case ButtonId::Right: {
+			int dir = id == ButtonId::Right ? 1 : -1;
+			switch (_ctrlPrefCursor) {
+			case 0:
+				settings.setAxisBinding(settings.axisBinding() == AxisBinding::SpeedUpDown
+				                            ? AxisBinding::SpeedLeftRight
+				                            : AxisBinding::SpeedUpDown);
+				break;
+			case 1:
+				settings.setMaxSpeedLevel((uint8_t)(settings.maxSpeedLevel() + dir));
+				break;
+			case 2:
+				settings.setAutostartLastRig(!settings.autostartLastRig());
+				break;
+			case 3:
+				settings.setButtonSound(!settings.buttonSound());
+				break;
+			}
+			break;
+		}
+		case ButtonId::Ok:
+			if (_ctrlPrefCursor == 0)
+				settings.setAxisBinding(settings.axisBinding() == AxisBinding::SpeedUpDown
+				                            ? AxisBinding::SpeedLeftRight
+				                            : AxisBinding::SpeedUpDown);
+			else if (_ctrlPrefCursor == 2)
+				settings.setAutostartLastRig(!settings.autostartLastRig());
+			else if (_ctrlPrefCursor == 3)
+				settings.setButtonSound(!settings.buttonSound());
+			break;
+		default:
+			break;
+		}
+	} else if (ev == ButtonEvent::LongPress && id == ButtonId::Left) {
+		_screen = Screen::Settings;
+	}
+}
+
+// --- Screen prefs (brightness) ------------------------------
+
+void Menu::handleScreenPrefsButton(ButtonId id, ButtonEvent ev) {
+	if (ev == ButtonEvent::Press) {
+		const int kStep = 16, kMin = 10;
+		if (id == ButtonId::Left) {
+			_pendingBrightness = max(kMin, _pendingBrightness - kStep);
+			display.setBrightness((uint8_t)_pendingBrightness);
+		} else if (id == ButtonId::Right) {
+			_pendingBrightness = min(255, _pendingBrightness + kStep);
+			display.setBrightness((uint8_t)_pendingBrightness);
+		} else if (id == ButtonId::Ok) {
+			settings.setBrightness((uint8_t)_pendingBrightness);
+			_screen = Screen::Settings;
+		}
+	} else if (ev == ButtonEvent::LongPress && id == ButtonId::Left) {
+		display.setBrightness(settings.brightness());
+		_screen = Screen::Settings;
+	}
+}
+
+// --- System (mock 23) --------------------------------------
+
+void Menu::handleSystemButton(ButtonId id, ButtonEvent ev) {
+	if (_sysConfirm != SysConfirm::None) {
+		if (ev == ButtonEvent::Press) {
+			if (id == ButtonId::Left || id == ButtonId::Up) _sysConfirmSel = 0;
+			else if (id == ButtonId::Right || id == ButtonId::Down) _sysConfirmSel = 1;
+			else if (id == ButtonId::Ok) {
+				bool yes = _sysConfirmSel == 0;
+				SysConfirm which = _sysConfirm;
+				_sysConfirm = SysConfirm::None;
+				if (yes && which == SysConfirm::Ota) ota.begin();
+				else if (yes && which == SysConfirm::Reset) {
+					settings.factoryReset();
+					ESP.restart();
+				}
+			}
+		} else if (ev == ButtonEvent::LongPress && id == ButtonId::Left) {
+			_sysConfirm = SysConfirm::None;
+		}
+		return;
+	}
+
+	if (ev == ButtonEvent::Press) {
+		switch (id) {
+		case ButtonId::Up:   _sysCursor = (_sysCursor + 3) % 4; break;
+		case ButtonId::Down: _sysCursor = (_sysCursor + 1) % 4; break;
+		case ButtonId::Left: _screen = Screen::Settings; break;
+		case ButtonId::Ok:
+			if (_sysCursor == 2) { _sysConfirmSel = 1; _sysConfirm = SysConfirm::Ota; }
+			else if (_sysCursor == 3) { _sysConfirmSel = 1; _sysConfirm = SysConfirm::Reset; }
+			break;
+		default: break;
+		}
+	} else if (ev == ButtonEvent::LongPress && id == ButtonId::Left) {
+		_screen = Screen::Settings;
+	}
+}
+
+// ===========================================================================
+// Status LED
+// ===========================================================================
+
 void Menu::updateStatusLed() {
-	// Blue (activity/workflow): solid once something is actually up,
-	// blinking while still connecting. OTA takes priority — it's a
-	// distinct mode, not the normal device state, and worth flagging
-	// clearly since WiFi disrupts BLE.
 	if (ota.state() == Ota::State::WaitingForUpload || ota.state() == Ota::State::Uploading) {
 		statusLed.setActivity(true, false);
 	} else {
-		bool anyConnected = false;
-		bool anyConnecting = false;
-		for (int i = 0; i < kDeviceCount; i++) {
-			if (kDevices[i]->isConnected()) anyConnected = true;
-			else if (kDevices[i]->isActive()) anyConnecting = true;
+		bool anyConnected = false, anyConnecting = false;
+		for (int i = 0; i < deviceCount(); i++) {
+			if (deviceAt(i)->isConnected()) anyConnected = true;
+			else if (deviceAt(i)->isActive()) anyConnecting = true;
 		}
 		statusLed.setActivity(anyConnected || anyConnecting, !anyConnected && anyConnecting);
 	}
-
-	// Yellow (power): requirements v10 §5 ties this to charge state (solid
-	// = on USB, blinking = discharging low), but there's no charge-detect
-	// GPIO wired up yet — approximated from battery percent until that
-	// gap is closed.
 	uint8_t pct = battery.percent();
 	statusLed.setPower(pct <= 20, pct <= 10);
 }

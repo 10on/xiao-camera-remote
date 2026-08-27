@@ -10,9 +10,13 @@ class DollyDevice : public Device, public NimBLEClientCallbacks {
 public:
 	const char *name() const override { return "Dolly"; }
 	const char *advertisedName() const override { return "NEEWER-DL"; }
+	DeviceKind kind() const override { return DeviceKind::Motion; }
+	int speedLevel() const override { return _speedLevel; }
+	int speedLevelMax() const override { return 5; }
 	const char *abbrev() const override { return "DL"; } // "ТЖ" in the design
 	uint16_t identityColor565() const override;
 	uint16_t identityTextColor565() const override;
+	void drawGlyph(Adafruit_GFX &g, int16_t x, int16_t y, int16_t size, uint16_t color) const override;
 
 	bool isActive() const override { return _active; }
 	bool isConnected() const override { return _connected; }

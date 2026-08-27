@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics><meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:oklch(96% 0.003 250);font-family:'IBM Plex Sans',sans-serif}
+a{color:oklch(55% 0.14 220)}a:hover{color:oklch(45% 0.14 220)}
+</style></helmet>
+
+<div style="padding:48px 44px 90px;max-width:1400px;margin:0 auto">
+  <div style="max-width:660px;margin-bottom:34px">
+    <div style="font:600 12px/1 'IBM Plex Mono',monospace;letter-spacing:.12em;color:oklch(55% 0.01 250);text-transform:uppercase;margin-bottom:10px">Что прошивка рисует сейчас · 280×240 · 1:1</div>
+    <h1 style="font:600 28px/1.25 'IBM Plex Sans',sans-serif;color:oklch(20% 0.005 250);margin:0 0 12px">Текущие экраны пульта</h1>
+    <p style="font:400 14px/1.65 'IBM Plex Sans',sans-serif;color:oklch(38% 0.005 250);margin:0 0 10px;text-wrap:pretty">Снято с <code style="font:500 13px 'IBM Plex Mono',monospace">src/menu.cpp</code> и <code style="font:500 13px 'IBM Plex Mono',monospace">src/theme.h</code>: те же координаты, те же цвета RGB565, та же латинская подпись клавиш. Панель 240×280 используется горизонтально, углы скруглены, безопасный отступ у верхней и нижней строки — 28 px.</p>
+    <p style="font:400 13px/1.6 'IBM Plex Sans',sans-serif;color:oklch(50% 0.005 250);margin:0;text-wrap:pretty">Ограничения железа, которые видны на всех макетах: Adafruit_GFX без градиентов (виньетка спеки заменена плоской полосой 3 px), встроенный шрифт 6×8 px для мелкой строки, кириллицы в шрифте нет — поэтому подписи латиницей.</p>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:40px 36px">
+
+    <!-- 1 DeviceList -->
+    <div style="display:flex;flex-direction:column;gap:9px;width:280px">
+      <div style="position:relative;width:280px;height:240px;border-radius:22px;background:#0d0e10;overflow:hidden;font-family:'IBM Plex Mono',monospace">
+        <div style="position:absolute;left:28px;top:2px;width:224px;height:3px;border-radius:2px;background:#0a7fd4"></div>
+        <div style="position:absolute;left:28px;top:9px;font:400 10px/10px 'IBM Plex Mono',monospace;color:#8b8d91">Slider+Phone</div>
+        <div style="position:absolute;right:28px;top:9px;display:flex;align-items:center;gap:5px"><span style="width:6px;height:6px;border-radius:3px;background:#00b45b"></span><span style="font:400 10px/10px 'IBM Plex Mono',monospace;color:#ebecee">82%</span></div>
+
+        <div style="position:absolute;left:0;top:68px;width:3px;height:26px;background:#00944a"></div>
+        <div style="position:absolute;left:20px;top:68px;width:26px;height:26px;border-radius:8px;background:#00944a;display:flex;align-items:center;justify-content:center;font:400 10px 'IBM Plex Mono',monospace;color:#04180d">SL</div>
+        <div style="position:absolute;left:55px;top:68px;height:26px;display:flex;align-items:center;font:600 17px 'IBM Plex Sans',sans-serif;color:#ebecee">Slider</div>
+        <div style="position:absolute;right:13px;top:72px;padding:3px 9px;border-radius:10px;background:#00b45b;font:400 10px/8px 'IBM Plex Mono',monospace;color:#04180d">READY</div>
+
+        <div style="position:absolute;left:20px;top:103px;width:26px;height:26px;border-radius:8px;background:#0a7fd4;display:flex;align-items:center;justify-content:center;font:400 10px 'IBM Plex Mono',monospace;color:#f4fbff">PH</div>
+        <div style="position:absolute;left:55px;top:103px;height:26px;display:flex;align-items:center;font:600 17px 'IBM Plex Sans',sans-serif;color:#ebecee">Phone</div>
+        <div style="position:absolute;right:13px;top:107px;padding:3px 9px;border-radius:10px;background:#d99a00;font:400 10px/8px 'IBM Plex Mono',monospace;color:#20180a">..</div>
+
+        <div style="position:absolute;left:20px;top:138px;width:26px;height:26px;border-radius:8px;background:#a04ed6;display:flex;align-items:center;justify-content:center;font:400 10px 'IBM Plex Mono',monospace;color:#fdf5ff">DL</div>
+        <div style="position:absolute;left:55px;top:138px;height:26px;display:flex;align-items:center;font:600 17px 'IBM Plex Sans',sans-serif;color:#ebecee">Dolly</div>
+        <div style="position:absolute;right:13px;top:142px;padding:3px 9px;border-radius:10px;background:#2b2d30;font:400 10px/8px 'IBM Plex Mono',monospace;color:#a4a6aa">OFF</div>
+
+        <div style="position:absolute;left:0;right:0;top:222px;text-align:center;font:400 10px/10px 'IBM Plex Mono',monospace;color:#5f6165">OK:DEVICE  RIGHT:CTRL  HOLD-UP:MENU</div>
+      </div>
+      <div style="font:600 14px 'IBM Plex Sans',sans-serif;color:oklch(24% 0.005 250)">Device List — стартовый экран</div>
+      <div style="font:400 12px/1.5 'IBM Plex Sans',sans-serif;color:oklch(50% 0.005 250)">Каждое устройство включается вручную. Слева зелёная полоска 3 px — курсор выбора.</div>
+    </div>
+
+    <!-- 2 Control -->
+    <div style="display:flex;flex-direction:column;gap:9px;width:280px">
+      <div style="position:relative;width:280px;height:240px;border-radius:22px;background:#0d0e10;overflow:hidden;font-family:'IBM Plex Mono',monospace">
+        <div style="position:absolute;left:28px;top:2px;width:224px;height:3px;border-radius:2px;background:#0a7fd4"></div>
+        <div style="position:absolute;left:28px;top:9px;font:400 10px/10px 'IBM Plex Mono',monospace;color:#8b8d91">Slider+Phone</div>
+        <div style="position:absolute;right:28px;top:9px;display:flex;align-items:center;gap:5px"><span style="width:6px;height:6px;border-radius:3px;background:#00b45b"></span><span style="font:400 10px/10px 'IBM Plex Mono',monospace;color:#ebecee">82%</span></div>
+        <div style="position:absolute;left:20px;top:68px;width:26px;height:26px;border-radius:8px;background:#00944a;display:flex;align-items:center;justify-content:center;font:400 10px 'IBM Plex Mono',monospace;color:#04180d">SL</div>
+        <div style="position:absolute;left:55px;top:68px;height:26px;display:flex;align-items:center;font:600 17px 'IBM Plex Sans',sans-serif;color:#ebecee">Slider</div>
+        <div style="position:absolute;right:13px;top:72px;padding:3px 9px;border-radius:10px;background:#00b45b;font:400 10px/8px 'IBM Plex Mono',monospace;color:#04180d">READY</div>
+        <div style="position:absolute;left:20px;top:103px;width:26px;height:26px;border-radius:8px;background:#0a7fd4;display:flex;align-items:center;justify-content:center;font:400 10px 'IBM Plex Mono',monospace;color:#f4fbff">PH</div>
+        <div style="position:absolute;left:55px;top:103px;height:26px;display:flex;align-items:center;font:600 17px 'IBM Plex Sans',sans-serif;color:#ebecee">Phone</div>
+        <div style="position:absolute;right:13px;top:107px;padding:3px 9px;border-radius:10px;background:#00b45b;font:400 10px/8px 'IBM Plex Mono',monospace;color:#04180d">READY</div>
+        <div style="position:absolute;left:20px;top:138px;width:26px;height:26px;border-radius:8px;background:#a04ed6;display:flex;align-items:center;justify-content:center;font:400 10px 'IBM Plex Mono',monospace;color:#fdf5ff">DL</div>
+        <div style="position:absolute;left:55px;top:138px;height:26px;display:flex;align-items:center;font:600 17px 'IBM Plex Sans',sans-serif;color:#ebecee">Dolly</div>
+        <div style="position:absolute;right:13px;top:142px;padding:3px 9px;border-radius:10px;background:#2b2d30;font:400 10px/8px 'IBM Plex Mono',monospace;color:#a4a6aa">OFF</div>
+        <div style="position:absolute;left:0;right:0;top:222px;text-align:center;font:400 10px/10px 'IBM Plex Mono',monospace;color:#5f6165">OK:REC  D-PAD:MOTION  HOLD-L:BACK</div>
+      </div>
+      <div style="font:600 14px 'IBM Plex Sans',sans-serif;color:oklch(24% 0.005 250)">Control — управление</div>
+      <div style="font:400 12px/1.5 'IBM Plex Sans',sans-serif;color:oklch(50% 0.005 250)">Тот же список, другая подпись клавиш. Ни скорости, ни направления, ни позиции слайдера на экране нет.</div>
+    </div>
+
+    <!-- 3 Recording -->
+    <div style="display:flex;flex-direction:column;gap:9px;width:280px">
+      <div style="position:relative;width:280px;height:240px;border-radius:22px;background:#0d0e10;overflow:hidden;box-shadow:inset 0 0 0 1px #c8391f;font-family:'IBM Plex Mono',monospace">
+        <div style="position:absolute;left:28px;top:2px;width:224px;height:3px;border-radius:2px;background:#c8391f"></div>
+        <div style="position:absolute;left:28px;top:9px;font:400 10px/10px 'IBM Plex Mono',monospace;color:#8b8d91">Slider+Phone</div>
+        <div style="position:absolute;right:28px;top:9px;display:flex;align-items:center;gap:5px"><span style="width:6px;height:6px;border-radius:3px;background:#c8391f"></span><span style="font:400 10px/10px 'IBM Plex Mono',monospace;color:#ebecee">79%</span></div>
+        <div style="position:absolute;left:0;right:0;top:48px;display:flex;justify-content:center"><span style="padding:3px 9px;border-radius:10px;background:#c8391f;font:400 10px/8px 'IBM Plex Mono',monospace;color:#ffeae6">REC</span></div>
+        <div style="position:absolute;left:0;right:0;top:79px;text-align:center;font:700 46px/46px 'IBM Plex Mono',monospace;color:#ffeae6">00:47</div>
+        <div style="position:absolute;left:0;right:0;top:151px;display:flex;justify-content:center"><span style="padding:3px 9px;border-radius:10px;background:#00b45b;font:400 10px/8px 'IBM Plex Mono',monospace;color:#04180d">MOTION</span></div>
+        <div style="position:absolute;left:0;right:0;top:222px;text-align:center;font:400 10px/10px 'IBM Plex Mono',monospace;color:#c8391f">OK - STOP</div>
+      </div>
+      <div style="font:600 14px 'IBM Plex Sans',sans-serif;color:oklch(24% 0.005 250)">Дубль (combo)</div>
+      <div style="font:400 12px/1.5 'IBM Plex Sans',sans-serif;color:oklch(50% 0.005 250)">Появляется, когда активны телефон и моторное устройство: одно нажатие шлёт MoveForward + Record.</div>
+    </div>
+
+    <!-- 4 Connection lost -->
+    <div style="display:flex;flex-direction:column;gap:9px;width:280px">
+      <div style="position:relative;width:280px;height:240px;border-radius:22px;background:#0d0e10;overflow:hidden;box-shadow:inset 0 0 0 1px #d99a00;font-family:'IBM Plex Mono',monospace">
+        <div style="position:absolute;left:28px;top:2px;width:224px;height:3px;border-radius:2px;background:#d99a00"></div>
+        <div style="position:absolute;left:28px;top:9px;font:400 10px/10px 'IBM Plex Mono',monospace;color:#8b8d91">Slider+Phone</div>
+        <div style="position:absolute;right:28px;top:9px;font:400 10px/10px 'IBM Plex Mono',monospace;color:#ebecee">85%</div>
+        <div style="position:absolute;left:124px;top:54px;width:32px;height:32px;border-radius:9px;background:#a04ed6;display:flex;align-items:center;justify-content:center;font:400 13px 'IBM Plex Mono',monospace;color:#fdf5ff">DL</div>
+        <div style="position:absolute;left:0;right:0;top:95px;text-align:center;font:700 23px/23px 'IBM Plex Sans',sans-serif;color:#ebecee">Dolly</div>
+        <div style="position:absolute;left:0;right:0;top:127px;display:flex;justify-content:center"><span style="padding:3px 9px;border-radius:10px;background:#d99a00;font:400 10px/8px 'IBM Plex Mono',monospace;color:#20180a">NO LINK</span></div>
+        <div style="position:absolute;left:0;right:0;top:155px;text-align:center;font:400 10px/10px 'IBM Plex Mono',monospace;color:#5f6165">RECONNECTING...</div>
+        <div style="position:absolute;left:0;right:0;top:222px;text-align:center;font:400 10px/10px 'IBM Plex Mono',monospace;color:#5f6165">Slider, Phone OK</div>
+      </div>
+      <div style="font:600 14px 'IBM Plex Sans',sans-serif;color:oklch(24% 0.005 250)">Потеря связи — перекрытие</div>
+      <div style="font:400 12px/1.5 'IBM Plex Sans',sans-serif;color:oklch(50% 0.005 250)">Полноэкранное, глотает все кнопки кроме OK. Через 30 с строка меняется на FAILED - OK:RETRY.</div>
+    </div>
+
+    <!-- 5 Menu -->
+    <div style="display:flex;flex-direction:column;gap:9px;width:280px">
+      <div style="position:relative;width:280px;height:240px;border-radius:22px;background:#0d0e10;overflow:hidden;font-family:'IBM Plex Mono',monospace">
+        <div style="position:absolute;left:28px;top:9px;font:400 10px/10px 'IBM Plex Mono',monospace;color:#8b8d91">MENU</div>
+        <div style="position:absolute;left:13px;top:69px;width:254px;height:34px;border-radius:11px;background:#00b45b;display:flex;align-items:center;padding-left:12px;box-sizing:border-box;font:700 17px 'IBM Plex Sans',sans-serif;color:#04180d">PROFILES</div>
+        <div style="position:absolute;left:13px;top:110px;width:254px;height:34px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;box-sizing:border-box"><span style="font:400 17px 'IBM Plex Sans',sans-serif;color:#a4a6aa">BRIGHTNESS</span><span style="width:56px;height:4px;border-radius:2px;background:#2b2d30;display:block"><span style="display:block;width:75%;height:100%;border-radius:2px;background:#a4a6aa"></span></span></div>
+        <div style="position:absolute;left:13px;top:151px;width:254px;height:34px;display:flex;align-items:center;padding-left:12px;box-sizing:border-box;font:400 17px 'IBM Plex Sans',sans-serif;color:#a4a6aa">OTA UPDATE</div>
+        <div style="position:absolute;left:0;right:0;top:222px;text-align:center;font:400 10px/10px 'IBM Plex Mono',monospace;color:#5f6165">UP/DN  OK:OPEN  LEFT:BACK</div>
+      </div>
+      <div style="font:600 14px 'IBM Plex Sans',sans-serif;color:oklch(24% 0.005 250)">Меню</div>
+      <div style="font:400 12px/1.5 'IBM Plex Sans',sans-serif;color:oklch(50% 0.005 250)">Три пункта, выбранный — сплошная зелёная плашка (градиента у GFX нет).</div>
+    </div>
+
+    <!-- 6 Profiles -->
+    <div style="display:flex;flex-direction:column;gap:9px;width:280px">
+      <div style="position:relative;width:280px;height:240px;border-radius:22px;background:#0d0e10;overflow:hidden;font-family:'IBM Plex Mono',monospace">
+        <div style="position:absolute;left:28px;top:9px;font:400 10px/10px 'IBM Plex Mono',monospace;color:#8b8d91">PROFILES</div>
+        <div style="position:absolute;left:13px;top:69px;width:254px;height:34px;border-radius:11px;background:#00b45b;display:flex;align-items:center;padding-left:12px;box-sizing:border-box;font:700 17px 'IBM Plex Sans',sans-serif;color:#04180d">Slider+Phone</div>
+        <div style="position:absolute;left:13px;top:110px;width:254px;height:34px;display:flex;align-items:center;padding-left:12px;box-sizing:border-box;font:400 17px 'IBM Plex Sans',sans-serif;color:#a4a6aa">Dolly</div>
+        <div style="position:absolute;left:13px;top:151px;width:254px;height:34px;display:flex;align-items:center;padding-left:12px;box-sizing:border-box;font:400 17px 'IBM Plex Sans',sans-serif;color:#a4a6aa">Dolly+Phone</div>
+        <div style="position:absolute;left:0;right:0;top:222px;text-align:center;font:400 10px/10px 'IBM Plex Mono',monospace;color:#5f6165">UP/DN:SELECT  OK:OPEN  LEFT:BACK</div>
+      </div>
+      <div style="font:600 14px 'IBM Plex Sans',sans-serif;color:oklch(24% 0.005 250)">Профили</div>
+      <div style="font:400 12px/1.5 'IBM Plex Sans',sans-serif;color:oklch(50% 0.005 250)">Пять зашитых профилей, окно на три строки. Живут в глубине: Меню → Профили.</div>
+    </div>
+
+    <!-- 7 Bindings -->
+    <div style="display:flex;flex-direction:column;gap:9px;width:280px">
+      <div style="position:relative;width:280px;height:240px;border-radius:22px;background:#0d0e10;overflow:hidden;font-family:'IBM Plex Mono',monospace">
+        <div style="position:absolute;left:28px;top:9px;font:400 10px/10px 'IBM Plex Mono',monospace;color:#8b8d91">BINDINGS</div>
+        <div style="position:absolute;left:13px;top:69px;width:254px;height:34px;border-radius:11px;background:#00b45b;display:flex;align-items:center;padding-left:12px;box-sizing:border-box;font:700 17px 'IBM Plex Sans',sans-serif;color:#04180d">Speed U/D</div>
+        <div style="position:absolute;left:13px;top:110px;width:254px;height:34px;display:flex;align-items:center;padding-left:12px;box-sizing:border-box;font:400 17px 'IBM Plex Sans',sans-serif;color:#a4a6aa">Speed L/R</div>
+        <div style="position:absolute;left:13px;top:151px;width:254px;height:34px;display:flex;align-items:center;padding-left:12px;box-sizing:border-box;font:400 17px 'IBM Plex Sans',sans-serif;color:#a4a6aa">Dolly</div>
+        <div style="position:absolute;left:0;right:0;top:222px;text-align:center;font:400 10px/10px 'IBM Plex Mono',monospace;color:#5f6165">UP/DN:PRESET  OK:APPLY  LEFT:BACK</div>
+      </div>
+      <div style="font:600 14px 'IBM Plex Sans',sans-serif;color:oklch(24% 0.005 250)">Биндинги</div>
+      <div style="font:400 12px/1.5 'IBM Plex Sans',sans-serif;color:oklch(50% 0.005 250)">Выбранный пресет виден только здесь — на рабочем экране он нигде не подписан.</div>
+    </div>
+
+    <!-- 8 Brightness -->
+    <div style="display:flex;flex-direction:column;gap:9px;width:280px">
+      <div style="position:relative;width:280px;height:240px;border-radius:22px;background:#0d0e10;overflow:hidden;font-family:'IBM Plex Mono',monospace">
+        <div style="position:absolute;left:28px;top:9px;font:400 10px/10px 'IBM Plex Mono',monospace;color:#8b8d91">BRIGHTNESS</div>
+        <div style="position:absolute;left:0;right:0;top:90px;text-align:center;font:400 40px/32px 'IBM Plex Mono',monospace;color:#ebecee">75</div>
+        <div style="position:absolute;left:13px;top:138px;width:254px;height:8px;box-sizing:border-box;border:1px solid #3a3c40"><span style="display:block;width:75%;height:6px;background:#00b45b"></span></div>
+        <div style="position:absolute;left:0;right:0;top:222px;text-align:center;font:400 10px/10px 'IBM Plex Mono',monospace;color:#5f6165">L/R:ADJUST  OK:SAVE  HOLD-L:CANCEL</div>
+      </div>
+      <div style="font:600 14px 'IBM Plex Sans',sans-serif;color:oklch(24% 0.005 250)">Яркость</div>
+      <div style="font:400 12px/1.5 'IBM Plex Sans',sans-serif;color:oklch(50% 0.005 250)">Правится на месте, подсветка меняется сразу; отмена возвращает сохранённое значение.</div>
+    </div>
+
+    <!-- 9 OTA -->
+    <div style="display:flex;flex-direction:column;gap:9px;width:280px">
+      <div style="position:relative;width:280px;height:240px;border-radius:22px;background:#0d0e10;overflow:hidden;box-shadow:inset 0 0 0 1px #d99a00;font-family:'IBM Plex Mono',monospace">
+        <div style="position:absolute;left:28px;top:9px;font:400 10px/10px 'IBM Plex Mono',monospace;color:#5f6165">BLE: OFF</div>
+        <div style="position:absolute;right:28px;top:9px;font:400 10px/10px 'IBM Plex Mono',monospace;color:#d99a00">WIFI: ON</div>
+        <div style="position:absolute;left:0;right:0;top:65px;text-align:center;font:400 20px/16px 'IBM Plex Mono',monospace;color:#ebecee">OTA MODE</div>
+        <div style="position:absolute;left:0;right:0;top:97px;text-align:center;font:700 30px/30px 'IBM Plex Mono',monospace;color:#d99a00">192.168.1.42</div>
+        <div style="position:absolute;left:0;right:0;top:143px;text-align:center;font:400 10px/10px 'IBM Plex Mono',monospace;color:#8b8d91">Waiting for connection...</div>
+        <div style="position:absolute;left:13px;top:200px;width:254px;height:18px;border-radius:6px;background:#d99a00;display:flex;align-items:center;padding-left:6px;box-sizing:border-box;font:400 10px 'IBM Plex Mono',monospace;color:#20180a">FUNCTIONS DISABLED</div>
+        <div style="position:absolute;left:0;right:0;top:222px;text-align:center;font:400 10px/10px 'IBM Plex Mono',monospace;color:#5f6165">OK - EXIT</div>
+      </div>
+      <div style="font:600 14px 'IBM Plex Sans',sans-serif;color:oklch(24% 0.005 250)">OTA</div>
+      <div style="font:400 12px/1.5 'IBM Plex Sans',sans-serif;color:oklch(50% 0.005 250)">Реальный IP из сети, а не 192.168.4.1 из мокапа: пульт подключается к сети, а не поднимает точку.</div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

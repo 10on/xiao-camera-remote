@@ -38,6 +38,16 @@ uint16_t PhoneDevice::identityTextColor565() const {
 	return theme::kPhoneText;
 }
 
+// Phone body outline + speaker slot (mock icon set).
+void PhoneDevice::drawGlyph(Adafruit_GFX &g, int16_t x, int16_t y, int16_t s, uint16_t c) const {
+	int16_t iw = s * 10 / 26, ih = s * 15 / 26;
+	if (iw < 8) iw = 8;
+	int16_t ix = x + (s - iw) / 2, iy = y + (s - ih) / 2;
+	g.drawRoundRect(ix, iy, iw, ih, 2, c);
+	g.drawRoundRect(ix + 1, iy + 1, iw - 2, ih - 2, 2, c); // ~2px stroke
+	g.fillRect(ix + iw / 2 - 1, iy + 3, 3, 1, c);           // speaker
+}
+
 void PhoneDevice::ensureInitialized() {
 	if (_server) return;
 
@@ -102,8 +112,57 @@ void PhoneDevice::deactivate() {
 	_connected = false;
 }
 
+int PhoneDevice::bondIndexOf(const NimBLEAddress &addr) const {
+	int n = NimBLEDevice::getNumBonds();
+	for (int i = 0; i < n; i++)
+		if (NimBLEDevice::getBondedAddress(i) == addr) return i;
+	return -1;
+}
+
+int PhoneDevice::bondedPhoneCount() const { return NimBLEDevice::getNumBonds(); }
+
+const char *PhoneDevice::activePhoneLabel() const {
+	static char buf[10];
+	if (!_connected) return "-";
+	int idx = bondIndexOf(_connectedAddr);
+	if (idx < 0) {
+		snprintf(buf, sizeof(buf), "Phone");
+	} else {
+		snprintf(buf, sizeof(buf), "Phone %d", idx + 1);
+	}
+	return buf;
+}
+
+bool PhoneDevice::switchToNextPhone() {
+	int n = NimBLEDevice::getNumBonds();
+	if (n < 2 || !_server) return false;
+
+	int cur = _connected ? bondIndexOf(_connectedAddr) : -1;
+	int next = (cur + 1) % n;
+	_preferredAddr = NimBLEDevice::getBondedAddress(next);
+	_havePreference = true;
+	_switchDeadlineMs = millis() + 10000;
+
+	for (uint16_t handle : _server->getPeerDevices()) _server->disconnect(handle);
+	_connected = false;
+	startAdvertising();
+	return true;
+}
+
 void PhoneDevice::onConnect(NimBLEServer *server, NimBLEConnInfo &connInfo) {
+	// While a switch is pending, bounce anyone who isn't the target — they
+	// keep retrying, the preferred phone gets a window to grab the slot.
+	// After the deadline, accept whoever connects so we can't lock out.
+	NimBLEAddress id = connInfo.getIdAddress();
+	if (_havePreference && millis() < _switchDeadlineMs && !(id == _preferredAddr)) {
+		server->disconnect(connInfo.getConnHandle());
+		startAdvertising();
+		return;
+	}
+
 	_connected = true;
+	_connectedAddr = id;
+	_havePreference = false;
 	server->updateConnParams(connInfo.getConnHandle(), 12, 24, 0, 200);
 }
 
