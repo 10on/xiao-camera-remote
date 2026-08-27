@@ -5,7 +5,6 @@ Settings settings;
 
 static const char *kNamespace = "settings";
 static const char *kKeyRig = "rig";
-static const char *kKeyAxis = "axis";
 static const char *kKeyAutostart = "autorig";
 static const char *kKeyMaxSpeed = "maxspd";
 static const char *kKeyKeySound = "keysnd";
@@ -18,18 +17,13 @@ void Settings::begin() {
 	// RW creates it empty; getX() still returns the defaults below.
 	prefs.begin(kNamespace, /*readOnly=*/false);
 	_rigIndex = prefs.getInt(kKeyRig, 0);
-	_axisBinding = (AxisBinding)prefs.getUChar(kKeyAxis, (uint8_t)AxisBinding::SpeedUpDown);
 	_autostartLastRig = prefs.getBool(kKeyAutostart, false);
 	_maxSpeedLevel = prefs.getUChar(kKeyMaxSpeed, 8);
 	_buttonSound = prefs.getBool(kKeyKeySound, true);
 	_brightness = prefs.getUChar(kKeyBrightness, 200);
 	prefs.end();
 
-	// rigIndex is range-checked against the live rig list by the Menu (rig
-	// count is dynamic now) — here just guard the obviously-bad.
 	if (_rigIndex < 0) _rigIndex = 0;
-	if (_axisBinding != AxisBinding::SpeedUpDown && _axisBinding != AxisBinding::SpeedLeftRight)
-		_axisBinding = AxisBinding::SpeedUpDown;
 	if (_maxSpeedLevel < 1 || _maxSpeedLevel > 8) _maxSpeedLevel = 8;
 }
 
@@ -41,13 +35,6 @@ void Settings::setRigIndex(int index) {
 	prefs.end();
 }
 
-void Settings::setAxisBinding(AxisBinding binding) {
-	_axisBinding = binding;
-	Preferences prefs;
-	prefs.begin(kNamespace, false);
-	prefs.putUChar(kKeyAxis, (uint8_t)binding);
-	prefs.end();
-}
 
 void Settings::setAutostartLastRig(bool enabled) {
 	_autostartLastRig = enabled;

@@ -550,152 +550,115 @@ void Menu::renderControlMotion(const Rig &r) {
 	int ready, total;
 	rigPhoneCounts(_activeRig, ready, total);
 
-	// Fixed grid straight off mock screens 4 / 6 — no floating flow.
-	const int16_t PAD = theme::kPadH;             // 13
-	const int16_t W = t.width() - 2 * PAD;        // 254
+	const int16_t PAD = theme::kPadH;
+	const int16_t W = t.width() - 2 * PAD;
 	const int lvl = m->speedLevel(), mx = m->speedLevelMax();
-	const bool speedUD = settings.axisBinding() == AxisBinding::SpeedUpDown;
+	const bool prog = m->programName() != nullptr;
+	const bool fault = m->inFault();
+	const bool running = fault ? false : (m->programRunning() || _mainMotion != MainMotion::Stopped);
 
 	uint16_t bar = _takeActive ? theme::kRecordFill
-	               : (total > 0 && ready == 0) ? theme::kWarnFill
-	                                           : theme::kOkFill;
+	               : fault    ? theme::kRecordFill
+	               : running  ? theme::kOkFill
+	                          : theme::kDivider;
 	char cam[12];
 	if (total > 0) snprintf(cam, sizeof(cam), "CAM %d/%d", ready, total);
 	chromeBattery(r.name, bar, total > 0 ? cam : nullptr,
-	              ready == total ? theme::kOkFill : theme::kWarnFill);
-	if (_takeActive) t.drawRect(0, 0, t.width(), t.height(), theme::kRecordFill);
+	              ready >= total && ready > 0 ? theme::kOkFill : theme::kWarnFill);
+	if (_takeActive || fault) t.drawRect(0, 0, t.width(), t.height(), bar);
 
-	// State pill: real device telemetry where available (slider), else the
-	// Menu's own locally-tracked jog state (dolly).
-	const bool prog = m->programName() != nullptr;
-	const bool fault = m->inFault();
-	const char *st = m->motionStateText();
-	if (!st)
-		st = _mainMotion == MainMotion::Forward    ? "RUN >"
-		     : _mainMotion == MainMotion::Backward ? "RUN <"
-		                                           : "IDLE";
-	bool moving;
-	if (fault) moving = false;
-	else if (m->motionStateText())
-		moving = strcmp(st, "IDLE") != 0 && strcmp(st, "SLEEP") != 0;
-	else moving = _mainMotion != MainMotion::Stopped;
-	uint16_t stF = fault ? theme::kRecordFill : moving ? theme::kOkFill : theme::kDivider;
-	uint16_t stT = fault ? theme::kRecordText : moving ? theme::kOkText : theme::kTextPrimary;
+	// Plain state word — no protocol jargon.
+	const char *state = fault              ? "ERROR"
+	                    : m->programRunning() ? "RUNNING"
+	                    : (m->motionStateText() && !strcmp(m->motionStateText(), "HOMING")) ? "HOMING"
+	                    : _mainMotion == MainMotion::Forward  ? "FWD"
+	                    : _mainMotion == MainMotion::Backward ? "BACK"
+	                                                          : "STOPPED";
+	uint16_t stF = fault ? theme::kRecordFill : running ? theme::kOkFill : theme::kDivider;
+	uint16_t stT = fault ? theme::kRecordText : running ? theme::kOkText : theme::kTextPrimary;
 
-	int16_t x1, y1;
-	uint16_t w, h;
+	// --- Device row (y28) ---
+	deviceRow(28, m, m->name(), state, stF, stT, 26,
+	          _takeActive ? &FreeSans9pt7b : &FreeSansBold9pt7b);
 
 	if (_takeActive) {
-		// Red timer block — mock 6: y26 h64.
-		const int16_t by = 26, bh = 64;
+		// Red timer block.
+		const int16_t by = 62, bh = 60;
 		t.fillRoundRect(PAD, by, W, bh, 11, theme::kRecordFill);
 		uint32_t el = _recordStartedAtMs ? (millis() - _recordStartedAtMs) / 1000 : 0;
 		char tm[12];
 		snprintf(tm, sizeof(tm), "%02lu:%02lu", (unsigned long)(el / 60), (unsigned long)(el % 60));
-		text(PAD + 14, by + bh / 2, tm, theme::kRecordText, AlignL, &FreeMonoBold24pt7b);
-		char cc[14];
-		snprintf(cc, sizeof(cc), "%d/%d CAM", ready, total);
-		text(PAD + W - 12, by + 22, "* REC", theme::kRecordText, AlignR);
-		text(PAD + W - 12, by + 42, cc, theme::kRecordText, AlignR);
+		text(PAD + 16, by + bh / 2, tm, theme::kRecordText, AlignL, &FreeMonoBold24pt7b);
+		char cc[16];
+		snprintf(cc, sizeof(cc), "* %d/%d CAM", ready, total);
+		text(t.width() - PAD - 14, by + bh / 2, cc, theme::kRecordText, AlignR);
 
-		// Main row — mock 6: y100.  Phone-lost strip pushes it to y128.
-		int16_t rowY = 100;
-		if (total > 1 && ready < total) {
-			t.fillRoundRect(PAD, 100, W, 22, 9, theme::kWarnFill);
-			text(PAD + 10, 111, "! A CAMERA LOST LINK", theme::kWarnText);
-			rowY = 128;
-		}
-		char pillTxt[16];
-		snprintf(pillTxt, sizeof(pillTxt), "%s %d/%d", st, lvl, mx);
-		deviceRow(rowY, m, m->name(), pillTxt, stF, stT, 26, &FreeSans9pt7b);
+		segBar(PAD, 136, W, lvl, mx, m->identityColor565(), 8);
 
-		segBar(PAD, rowY + 34, W, lvl, mx, m->identityColor565(), 8);
-		text(PAD, rowY + 52, speedUD ? "UP/DN:SPEED  L/R:MOVE" : "L/R:SPEED  UP/DN:MOVE",
-		     theme::kTextHint);
-
-		t.fillRoundRect(PAD, 166, W, 34, 11, theme::kRecordFill);
-		centerText("OK - STOP REC", 183, theme::kRecordText, &FreeSansBold9pt7b);
+		t.fillRoundRect(PAD, 162, W, 36, 11, theme::kRecordFill);
+		centerText("OK - STOP", 162 + 18, theme::kRecordText, &FreeSansBold12pt7b);
 		footerLine("HOLD OK - STOP ALL", theme::kRecordFill);
 		return;
 	}
 
-	// --- Not recording: mock screen 4 / 5 fixed grid ---
-	deviceRow(28, m, m->name(), st, stF, stT, 26, &FreeSansBold9pt7b);
-
-	// SPEED, left column.
-	text(PAD, 66, "SPEED", theme::kTextHint);
+	// --- Big speed numeral (left) ---
+	text(PAD, 62, "SPEED", theme::kTextHint);
 	char num[4];
 	snprintf(num, sizeof(num), "%d", lvl);
-	text(PAD, 92, num, theme::kTextPrimary, AlignL, &FreeMonoBold24pt7b);
+	text(PAD + 4, 96, num, theme::kTextPrimary, AlignL, &FreeMonoBold24pt7b);
+	int16_t x1, y1;
+	uint16_t w, h;
 	t.setFont(&FreeMonoBold24pt7b);
 	t.setTextSize(1);
 	t.getTextBounds(num, 0, 0, &x1, &y1, &w, &h);
 	t.setFont(nullptr);
 	char den[6];
 	snprintf(den, sizeof(den), "/%d", mx);
-	text(PAD + (int16_t)w + 6, 100, den, theme::kTextSecondary);
+	text(PAD + 4 + (int16_t)w + 6, 104, den, theme::kTextSecondary);
 
-	// Right column.
-	if (prog) {
-		// Program-driven Main (slider): name + endstop/calibration telemetry
-		// (no manual jog on this screen — see docs/11_program_api.md).
-		text(t.width() - PAD, 66, m->programName(), theme::kTextInactive, AlignR, &FreeSansBold9pt7b);
-		int16_t dx = t.width() - PAD - 6;
-		t.fillCircle(dx, 92, 4, m->endstop2() ? theme::kWarnFill : theme::kDivider);
-		t.fillCircle(dx - 16, 92, 4, m->endstop1() ? theme::kWarnFill : theme::kDivider);
-		text(dx - 30, 92, "E1  E2", theme::kTextHint, AlignR);
-	} else {
-		text(t.width() - PAD, 66, "TRAVEL", theme::kTextHint, AlignR);
-		int16_t homeW = m->supportsHome() ? 46 : 0;
-		int16_t ax = t.width() - PAD - homeW - 30;
-		int16_t ay = 92;
-		uint16_t lc = _mainMotion == MainMotion::Backward ? theme::kOkFill : theme::kBorder;
-		uint16_t rc = _mainMotion == MainMotion::Forward ? theme::kOkFill : theme::kBorder;
-		t.fillTriangle(ax, ay, ax + 10, ay - 7, ax + 10, ay + 7, lc);
-		t.fillTriangle(ax + 18, ay - 7, ax + 18, ay + 7, ax + 28, ay, rc);
-		if (m->supportsHome()) pill(t.width() - PAD, ay, "HOME", theme::kDivider, theme::kTextInactive);
+	// --- Big direction indicator (right) ---
+	{
+		int16_t cx = t.width() - PAD - 34, cy = 92, s = 20;
+		uint16_t on = m->identityColor565();
+		if (_mainMotion == MainMotion::Forward)
+			t.fillTriangle(cx - s, cy - s, cx - s, cy + s, cx + s, cy, on);
+		else if (_mainMotion == MainMotion::Backward)
+			t.fillTriangle(cx + s, cy - s, cx + s, cy + s, cx - s, cy, on);
+		else { // stopped: pause bars
+			t.fillRect(cx - 10, cy - 15, 7, 30, theme::kBorder);
+			t.fillRect(cx + 3, cy - 15, 7, 30, theme::kBorder);
+		}
 	}
 
-	segBar(PAD, 120, W, lvl, mx, m->identityColor565());
-	text(PAD, 140,
-	     prog ? "UP/DN L/R:SPEED   HOLD>:HOME"
-	          : (speedUD ? (m->supportsHome() ? "UP/DN:SPEED  L/R:MOVE  HOLD>:HOME"
-	                                          : "UP/DN:SPEED  L/R:MOVE")
-	                     : "L/R:SPEED  UP/DN:MOVE"),
-	     theme::kTextHint);
+	segBar(PAD, 126, W, lvl, mx, m->identityColor565());
 
-	// Bottom action block — mock 4: y160 h38.
-	const int16_t ry = 160, rh = 38, rcy = ry + rh / 2;
+	// --- Bottom action block (y156) ---
+	const int16_t ry = 156, rh = 40, rcy = ry + rh / 2;
 	if (fault) {
 		t.fillRoundRect(PAD, ry, W, rh, 11, theme::kRecordFill);
-		centerText("FAULT - HOLD OK TO CLEAR", rcy, theme::kRecordText, &FreeSansBold9pt7b);
-		footerLine("HOLD OK - E-STOP   HOLD < - EXIT");
+		centerText("HOLD OK TO CLEAR ERROR", rcy, theme::kRecordText, &FreeSansBold9pt7b);
 	} else if (ready > 0) {
 		t.drawRoundRect(PAD, ry, W, rh, 11, theme::kRecordFill);
-		t.fillCircle(PAD + 18, rcy, 5, theme::kRecordFill);
-		text(PAD + 32, rcy, "OK - REC", theme::kTextPrimary, AlignL, &FreeSansBold9pt7b);
+		t.fillCircle(PAD + 20, rcy, 5, theme::kRecordFill);
+		text(PAD + 36, rcy, "OK - REC", theme::kTextPrimary, AlignL, &FreeSansBold12pt7b);
 		char cc[10];
 		snprintf(cc, sizeof(cc), "%d CAM", ready);
 		text(t.width() - PAD - 14, rcy, cc, theme::kOkFill, AlignR);
-		footerLine("HOLD OK - E-STOP");
 	} else if (total > 0) {
 		t.fillRoundRect(PAD, ry, W, rh, 11, theme::kDivider);
-		text(PAD + 12, ry + 13, "REC UNAVAILABLE", theme::kWarnFill, AlignL, &FreeSansBold9pt7b);
-		text(PAD + 12, ry + 27, "A CAMERA HAS NO LINK", theme::kTextInactive);
-		footerLine("HOLD OK - E-STOP   HOLD < - EXIT");
+		centerText("WAITING FOR A PHONE", rcy, theme::kWarnFill, &FreeSansBold9pt7b);
 	} else if (prog) {
-		// No camera: Ok is the program's START / STOP.
 		bool run = m->programRunning();
 		t.fillRoundRect(PAD, ry, W, rh, 11, run ? theme::kOkFill : theme::kBorder);
-		char lbl[24];
-		snprintf(lbl, sizeof(lbl), "OK - %s", run ? "STOP" : "START");
-		centerText(lbl, rcy, run ? theme::kOkText : theme::kTextPrimary, &FreeSansBold9pt7b);
-		footerLine("HOLD OK - E-STOP   HOLD < - EXIT");
+		centerText(run ? "OK - STOP" : "OK - START", rcy, run ? theme::kOkText : theme::kTextPrimary,
+		           &FreeSansBold12pt7b);
 	} else {
 		t.drawRoundRect(PAD, ry, W, rh, 11, theme::kBorder);
-		centerText("MOTION ONLY - NO CAMERA", rcy, theme::kTextInactive, &FreeSans9pt7b);
-		footerLine("HOLD OK - E-STOP   HOLD < - EXIT");
+		centerText(_mainMotion == MainMotion::Stopped ? "L/R TO DRIVE" : "OK - STOP", rcy,
+		           theme::kTextInactive, &FreeSans9pt7b);
 	}
+
+	footerLine("L/R DRIVE  UP/DN SPEED  HOLD OK E-STOP");
 }
 
 void Menu::renderControlCamerasOnly(const Rig &r) {
@@ -930,26 +893,17 @@ void Menu::renderControlPrefs() {
 	t.fillScreen(theme::kBackground);
 	chrome("CONTROL", nullptr, theme::kOkFill, false);
 
-	// Axes card.
-	bool axSel = _ctrlPrefCursor == 0;
-	int16_t y = 34;
-	t.fillRoundRect(theme::kPadH, y, t.width() - 2 * theme::kPadH, 42, 11,
-	                axSel ? theme::kOkFill : theme::kDivider);
-	text(theme::kPadH + 12, y + 15, "Axes", axSel ? theme::kOkText : theme::kTextInactive, AlignL,
-	     &FreeSansBold9pt7b);
-	text(theme::kPadH + 12, y + 30,
-	     settings.axisBinding() == AxisBinding::SpeedUpDown ? "SPEED ON UP/DN  MOVE ON L/R"
-	                                                        : "SPEED ON L/R  MOVE ON UP/DN",
-	     axSel ? theme::kOkText : theme::kTextHint);
-	y += 50;
+	text(theme::kPadH, 34,
+	     "Arrows: UP/DN speed, L/R direction", theme::kTextHint);
 
+	int16_t y = 58;
 	char spd[8];
 	snprintf(spd, sizeof(spd), "%d/8", settings.maxSpeedLevel());
-	y += prefRow(y, "Max speed", spd, _ctrlPrefCursor == 1);
-	y += prefRow(y, "Autostart last", settings.autostartLastRig() ? "ON" : "OFF", _ctrlPrefCursor == 2,
-	             settings.autostartLastRig() ? theme::kOkFill : theme::kTextHint);
-	y += prefRow(y, "Key sound", settings.buttonSound() ? "ON" : "OFF", _ctrlPrefCursor == 3,
-	             settings.buttonSound() ? theme::kOkFill : theme::kTextHint);
+	y += prefRow(y, "Max speed", spd, _ctrlPrefCursor == 0) + 4;
+	y += prefRow(y, "Autostart last", settings.autostartLastRig() ? "ON" : "OFF", _ctrlPrefCursor == 1,
+	             settings.autostartLastRig() ? theme::kOkFill : theme::kTextHint) + 4;
+	y += prefRow(y, "Key sound", settings.buttonSound() ? "ON" : "OFF", _ctrlPrefCursor == 2,
+	             settings.buttonSound() ? theme::kOkFill : theme::kTextHint) + 4;
 
 	footerLine("UP/DN:ITEM  L/R:VALUE  <:BACK");
 }

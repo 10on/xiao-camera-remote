@@ -4,8 +4,11 @@
 #include "device.h"
 
 // BLE central driver for the Neewer DL200 camera dolly.
-// Uses the literal packets from the reverse-engineered Neewer DL200 protocol;
-// its trailing byte is not a conventional checksum and must not be generated.
+// Packets + sequences from the reference web client
+// (everlastengineering.com ble-dl200.min.js): a move is always
+// ACCEL -> SPEEDn -> ENABLEMOTIONxxx, a stop is LIVEVIDEO -> MANUAL -> STOP,
+// every write in a sequence spaced ~90-100 ms. A bare speed packet has no
+// effect — speed only applies as part of a move sequence.
 class DollyDevice : public Device, public NimBLEClientCallbacks {
 public:
 	const char *name() const override { return "Dolly"; }
@@ -36,9 +39,11 @@ public:
 
 private:
 	void writePacket(const uint8_t *packet);
-	void setSpeed(uint8_t level);
-	void normalStop();
 	void emergencyStop();
+	void queueMove(); // ACCEL + SPEEDn + ENABLEMOTION at the current direction/speed
+	void queueStop(); // LIVEVIDEO + MANUAL + STOP
+	void enqueue(const uint8_t *packet);
+	void clearQueue();
 
 	NimBLEClient *_client = nullptr;
 	NimBLERemoteCharacteristic *_write = nullptr;
@@ -46,10 +51,27 @@ private:
 	bool _connected = false;
 	bool _initializing = false;
 	uint8_t _nextInitSpeed = 0;
-	uint8_t _speedLevel = 1;
 	uint32_t _nextInitAtMs = 0;
 	uint8_t _emergencyStep = 0;
 	uint32_t _nextEmergencyAtMs = 0;
+
+	uint8_t _speedLevel = 3; // 1..5
+	bool _dirRight = true;
+	bool _moving = false;
+
+	// Speed changes while moving are debounced: the level updates instantly
+	// (for the UI) but the ACCEL+SPEED+MOVE apply-sequence only fires once
+	// the user stops pressing.
+	bool _speedDirty = false;
+	uint32_t _speedApplyAtMs = 0;
+
+	// Paced write-without-response queue: the DL200 silently drops packets
+	// sent faster than a connection interval.
+	static const int kTxQueue = 12;
+	const uint8_t *_tx[kTxQueue] = {nullptr};
+	int _txHead = 0;
+	int _txCount = 0;
+	uint32_t _lastTxMs = 0;
 };
 
 extern DollyDevice dollyDevice;

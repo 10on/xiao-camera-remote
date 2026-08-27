@@ -526,16 +526,23 @@ void Menu::handleControlButton(ButtonId id, ButtonEvent ev) {
 		if (_takeActive) stopTake();
 		else if (ready > 0) startTake();
 		else if (m && m->programName()) {
-			// No camera to record: Ok is the program's explicit START/STOP.
+			// Phone-less program device: Ok is the program's START / STOP.
 			if (m->programRunning()) m->handleCommand(Command::StopProgram);
 			else if (!m->inFault() && m->canExecuteCommand(Command::StartProgram))
 				m->handleCommand(Command::StartProgram);
+		} else if (m) { // phone-less plain motion device: Ok is a plain STOP
+			m->handleCommand(Command::StopMove);
+			_mainMotion = MainMotion::Stopped;
 		}
 		return;
 	}
 
-	if (!m) return; // camera-only rig: arrows idle (all bonded phones connect on their own)
+	if (!m) return; // camera-only rig: arrows idle
 
+	// One fixed, obvious mapping for every motion device: up/down = speed,
+	// left/right = drive that way (press again or Ok = stop, opposite =
+	// reverse). No axis-binding choice, no manual-vs-program split on the
+	// arrows — a program device just ignores a jog it can't accept.
 	const int cap = settings.maxSpeedLevel();
 	auto speed = [&](bool up) {
 		if (up) {
@@ -544,36 +551,28 @@ void Menu::handleControlButton(ButtonId id, ButtonEvent ev) {
 			m->handleCommand(Command::SpeedDown);
 		}
 	};
-
-	// Program-driven Main (slider): the main screen has no manual jog — the
-	// slider owns the trajectory (docs/11_program_api.md). All four arrows
-	// adjust the program's speed. Manual F/B lives on a future Advanced
-	// screen.
-	if (m->programName()) {
-		if (id == ButtonId::Up || id == ButtonId::Right) speed(true);
-		else if (id == ButtonId::Down || id == ButtonId::Left) speed(false);
-		return;
-	}
-
-	// Legacy motion device (dolly): jog + speed per the axis-binding setting.
-	const bool speedUpDown = settings.axisBinding() == AxisBinding::SpeedUpDown;
-	auto move = [&](MainMotion dir, Command go) {
+	auto drive = [&](MainMotion dir, Command go) {
 		if (_mainMotion == dir) {
 			m->handleCommand(Command::StopMove);
 			_mainMotion = MainMotion::Stopped;
 		} else if (m->canExecuteCommand(go)) {
 			m->handleCommand(go);
 			_mainMotion = dir;
-		} else {
-			_mainMotion = MainMotion::Stopped;
 		}
 	};
 
+	if (_takeActive) {
+		// Mid-take: arrows only trim speed; the motion is the take's own.
+		if (id == ButtonId::Up) speed(true);
+		else if (id == ButtonId::Down) speed(false);
+		return;
+	}
+
 	switch (id) {
-	case ButtonId::Up:    speedUpDown ? speed(true)  : (void)move(MainMotion::Forward, Command::MoveForward); break;
-	case ButtonId::Down:  speedUpDown ? speed(false) : (void)move(MainMotion::Backward, Command::MoveBackward); break;
-	case ButtonId::Left:  speedUpDown ? (void)move(MainMotion::Backward, Command::MoveBackward) : speed(false); break;
-	case ButtonId::Right: speedUpDown ? (void)move(MainMotion::Forward, Command::MoveForward) : speed(true); break;
+	case ButtonId::Up:    speed(true); break;
+	case ButtonId::Down:  speed(false); break;
+	case ButtonId::Left:  drive(MainMotion::Backward, Command::MoveBackward); break;
+	case ButtonId::Right: drive(MainMotion::Forward, Command::MoveForward); break;
 	default: break;
 	}
 }
@@ -683,39 +682,26 @@ void Menu::handleScanButton(ButtonId id, ButtonEvent ev) {
 // --- Control prefs (mock 22) ----------------------------------
 
 void Menu::handleControlPrefsButton(ButtonId id, ButtonEvent ev) {
+	// Rows: 0 Max speed, 1 Autostart last, 2 Key sound.
 	if (ev == ButtonEvent::Press) {
 		switch (id) {
-		case ButtonId::Up:   _ctrlPrefCursor = (_ctrlPrefCursor + 3) % 4; break;
-		case ButtonId::Down: _ctrlPrefCursor = (_ctrlPrefCursor + 1) % 4; break;
+		case ButtonId::Up:   _ctrlPrefCursor = (_ctrlPrefCursor + 2) % 3; break;
+		case ButtonId::Down: _ctrlPrefCursor = (_ctrlPrefCursor + 1) % 3; break;
 		case ButtonId::Left:
 		case ButtonId::Right: {
 			int dir = id == ButtonId::Right ? 1 : -1;
-			switch (_ctrlPrefCursor) {
-			case 0:
-				settings.setAxisBinding(settings.axisBinding() == AxisBinding::SpeedUpDown
-				                            ? AxisBinding::SpeedLeftRight
-				                            : AxisBinding::SpeedUpDown);
-				break;
-			case 1:
+			if (_ctrlPrefCursor == 0)
 				settings.setMaxSpeedLevel((uint8_t)(settings.maxSpeedLevel() + dir));
-				break;
-			case 2:
+			else if (_ctrlPrefCursor == 1)
 				settings.setAutostartLastRig(!settings.autostartLastRig());
-				break;
-			case 3:
+			else
 				settings.setButtonSound(!settings.buttonSound());
-				break;
-			}
 			break;
 		}
 		case ButtonId::Ok:
-			if (_ctrlPrefCursor == 0)
-				settings.setAxisBinding(settings.axisBinding() == AxisBinding::SpeedUpDown
-				                            ? AxisBinding::SpeedLeftRight
-				                            : AxisBinding::SpeedUpDown);
-			else if (_ctrlPrefCursor == 2)
+			if (_ctrlPrefCursor == 1)
 				settings.setAutostartLastRig(!settings.autostartLastRig());
-			else if (_ctrlPrefCursor == 3)
+			else if (_ctrlPrefCursor == 2)
 				settings.setButtonSound(!settings.buttonSound());
 			break;
 		default:
