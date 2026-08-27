@@ -704,26 +704,27 @@ void Menu::renderControlCamerasOnly(const Rig &r) {
 	int ready, total;
 	rigPhoneCounts(_activeRig, ready, total);
 	const int16_t PAD = theme::kPadH, W = t.width() - 2 * PAD;
-	const bool multi = phoneDevice.bondedPhoneCount() > 1;
+	const int conn = phoneDevice.connectedCount();
 
-	chromeBattery(r.name, _takeActive ? theme::kRecordFill : theme::kPhoneFill);
+	char cam[12];
+	snprintf(cam, sizeof(cam), "CAM %d/%d", ready, total);
+	chromeBattery(r.name, _takeActive ? theme::kRecordFill : theme::kPhoneFill, cam,
+	              ready >= total && ready > 0 ? theme::kOkFill : theme::kWarnFill);
 	if (_takeActive) t.drawRect(0, 0, t.width(), t.height(), theme::kRecordFill);
 
-	// Up to 2 phone rows, mock 9: first at y36, 44px pitch.
+	// One row per connected phone + one "waiting" row if the slot expects more.
 	int16_t y = 36;
-	int shown = 0;
-	for (int i = 0; i < r.secondaryCount && shown < 2; i++) {
-		Device *d = deviceAt(r.secondary[i]);
-		if (!d || d->kind() != DeviceKind::Camera) continue;
-		bool up = d->isConnected();
-		const char *nm = (multi && up) ? phoneDevice.activePhoneLabel()
-		                               : deviceRegistry.alias(r.secondary[i]);
-		t.drawRoundRect(PAD, y, W, 36, 11, theme::kBorder);
-		deviceRow(y, d, nm, up ? "READY" : "LINK",
-		          up ? theme::kOkFill : theme::kWarnFill, up ? theme::kOkText : theme::kWarnText, 36,
+	int rows = conn > 0 ? conn : 1;
+	if (rows > 3) rows = 3;
+	for (int k = 0; k < rows; k++) {
+		bool up = k < conn;
+		char nm[12];
+		snprintf(nm, sizeof(nm), up ? "Phone %d" : "Phone", k + 1);
+		t.drawRoundRect(PAD, y, W, 34, 11, theme::kBorder);
+		deviceRow(y, deviceAt(1), nm, up ? "READY" : "LINKING",
+		          up ? theme::kOkFill : theme::kWarnFill, up ? theme::kOkText : theme::kWarnText, 34,
 		          &FreeSans9pt7b);
-		y += 44;
-		shown++;
+		y += 40;
 	}
 
 	y += 12;
@@ -740,7 +741,7 @@ void Menu::renderControlCamerasOnly(const Rig &r) {
 		footerLine("OK - STOP REC   HOLD OK - STOP ALL", theme::kRecordFill);
 	} else {
 		const int16_t bh = 46, bcy = y + bh / 2;
-		t.drawRoundRect(PAD, y, W, bh, 11, theme::kRecordFill);
+		t.fillRoundRect(PAD, y, W, bh, 11, ready > 0 ? theme::kRecordFill : theme::kDivider);
 		t.setFont(&FreeSansBold12pt7b);
 		t.setTextSize(1);
 		int16_t x1, y1;
@@ -748,12 +749,13 @@ void Menu::renderControlCamerasOnly(const Rig &r) {
 		t.getTextBounds("OK - REC", 0, 0, &x1, &y1, &w, &h);
 		t.setFont(nullptr);
 		int16_t tx = (t.width() + 22 - (int16_t)w) / 2;
-		t.fillCircle(tx - 16, bcy, 5, theme::kRecordFill);
-		text(tx, bcy, "OK - REC", theme::kTextPrimary, AlignL, &FreeSansBold12pt7b);
+		if (ready > 0) t.fillCircle(tx - 16, bcy, 5, theme::kRecordFill);
+		text(tx, bcy, "OK - REC", ready > 0 ? theme::kTextPrimary : theme::kTextInactive, AlignL,
+		     &FreeSansBold12pt7b);
 
-		footerLine(total > 1 ? "START GOES TO ALL CAMS" : "START GOES TO THE CAMERA",
+		footerLine(conn > 1 ? "START GOES TO ALL PHONES" : "WAITING FOR A PHONE TO CONNECT",
 		           theme::kTextSecondary, 192);
-		footerLine(multi ? ">:SWITCH PHONE   HOLD <:CONFIGS" : "HOLD <:CONFIGS");
+		footerLine("HOLD <:CONFIGS");
 	}
 }
 
@@ -869,16 +871,17 @@ void Menu::renderDeviceCard() {
 	};
 	kv(86, "ID", d->advertisedName()[0] ? d->advertisedName() : "-");
 	kv(103, "LAST SEEN", seenText(deviceRegistry.seen(_cardDevice)));
-	char rc[6];
-	snprintf(rc, sizeof(rc), "%d", deviceRegistry.rigMembership(_cardDevice));
-	kv(120, "IN RIGS", rc);
+	char rc[24];
+	if (d->kind() == DeviceKind::Camera)
+		snprintf(rc, sizeof(rc), "%d bond / %d up", phoneDevice.bondedPhoneCount(),
+		         phoneDevice.connectedCount());
+	else
+		snprintf(rc, sizeof(rc), "%d", deviceRegistry.rigMembership(_cardDevice));
+	kv(120, d->kind() == DeviceKind::Camera ? "PHONES" : "IN RIGS", rc);
 
-	const bool canSwitch = d->kind() == DeviceKind::Camera && phoneDevice.bondedPhoneCount() > 1;
-	const char *acts[] = {"Test link", "Rename", "Switch phone"};
-	const int actCount = canSwitch ? 3 : 2;
+	const char *acts[] = {"Test link", "Rename"};
 	int16_t y = 138;
-	for (int i = 0; i < actCount; i++)
-		y += listItem(y, acts[i], i == _cardCursor) + 4;
+	for (int i = 0; i < 2; i++) y += listItem(y, acts[i], i == _cardCursor) + 4;
 	footerLine("UP/DN  OK:DO  <:BACK");
 }
 

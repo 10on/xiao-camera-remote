@@ -64,6 +64,7 @@ void Menu::endSession() {
 void Menu::startTake() {
 	_takeActive = true;
 	_recordStartedAtMs = millis();
+	phoneDevice.markTakeStart();
 	fanToPhones(_activeRig, Command::Record);
 	const Rig *r = rigAt(_activeRig);
 	Device *m = rigMainOf(_activeRig);
@@ -82,6 +83,7 @@ void Menu::startTake() {
 void Menu::stopTake() {
 	_takeActive = false;
 	_recordStartedAtMs = 0;
+	phoneDevice.markTakeEnd();
 	fanToPhones(_activeRig, Command::StopRecord);
 	const Rig *r = rigAt(_activeRig);
 	Device *m = rigMainOf(_activeRig);
@@ -241,6 +243,7 @@ bool Menu::update() {
 		_takeActive = false;
 		_recordStartedAtMs = 0;
 		_mainMotion = MainMotion::Stopped;
+		phoneDevice.markTakeEnd();
 		needRender = true;
 	}
 
@@ -504,6 +507,7 @@ void Menu::handleControlButton(ButtonId id, ButtonEvent ev) {
 			_takeActive = false;
 			_recordStartedAtMs = 0;
 			_mainMotion = MainMotion::Stopped;
+			phoneDevice.markTakeEnd();
 			fanToMain(_activeRig, Command::EmergencyStop);
 			fanToPhones(_activeRig, Command::StopRecord);
 			return;
@@ -530,12 +534,7 @@ void Menu::handleControlButton(ButtonId id, ButtonEvent ev) {
 		return;
 	}
 
-	if (!m) {
-		// Camera-only rig: Right cycles to the next bonded phone (quick
-		// switch — not simultaneous). Everything else idle.
-		if (id == ButtonId::Right && !_takeActive) phoneDevice.switchToNextPhone();
-		return;
-	}
+	if (!m) return; // camera-only rig: arrows idle (all bonded phones connect on their own)
 
 	const int cap = settings.maxSpeedLevel();
 	auto speed = [&](bool up) {
@@ -635,9 +634,7 @@ void Menu::handleDevicesButton(ButtonId id, ButtonEvent ev) {
 
 void Menu::handleDeviceCardButton(ButtonId id, ButtonEvent ev) {
 	Device *d = deviceAt(_cardDevice);
-	// Actions: 0 test link, 1 rename, [2 switch phone] when >1 phone bonded.
-	const bool canSwitch = d && d->kind() == DeviceKind::Camera && phoneDevice.bondedPhoneCount() > 1;
-	const int acts = canSwitch ? 3 : 2;
+	const int acts = 2; // 0 test link, 1 rename
 
 	if (ev == ButtonEvent::Press) {
 		switch (id) {
@@ -650,10 +647,8 @@ void Menu::handleDeviceCardButton(ButtonId id, ButtonEvent ev) {
 		case ButtonId::Ok:
 			if (_cardCursor == 0) {
 				if (d) d->isActive() ? d->deactivate() : d->activate();
-			} else if (_cardCursor == 1) {
-				openTextEntry(TextReturn::DeviceRename, deviceRegistry.alias(_cardDevice));
 			} else {
-				phoneDevice.switchToNextPhone();
+				openTextEntry(TextReturn::DeviceRename, deviceRegistry.alias(_cardDevice));
 			}
 			break;
 		default:

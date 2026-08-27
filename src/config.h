@@ -99,15 +99,18 @@
 // docs/hardware.md for the transistor + resistor values.
 #define PIN_BUZZER     44  // D7
 
-// --- Power management (deep sleep, v14 §7 stage 2) ---
-// Stage 1 (light sleep, BLE-coordinated) is NOT implemented — needs
-// ESP-IDF automatic light sleep config that isn't trivial to get right
-// under Arduino/PlatformIO; deferred. This is just the deep-sleep stage:
-// full reboot on wake, no BLE-connection preservation attempted.
-#define IDLE_DEEPSLEEP_MS   (60UL * 1000)  // TEMP: 1 min for testing, restore to 20 min after
-// #define IDLE_DEEPSLEEP_MS   (20UL * 60 * 1000)  // 20 min inactivity -> deep sleep
-#define DAILY_CHECK_SEC     (24UL * 60 * 60)     // wake once a day to check battery
-#define BATT_CRITICAL_PCT   10
+// --- Power management: two idle stages (v14 §7) ---
+// Stage 1 — screen off: after IDLE_SCREEN_OFF_MS of no button activity the
+//   backlight goes dark, rendering pauses, but the MCU stays awake and all
+//   BLE links stay up. Any button wakes the screen and that first press is
+//   consumed (does not act). Runs even during a session.
+// Stage 2 — deep sleep: after IDLE_DEEPSLEEP_MS of no button activity the
+//   MCU deep-sleeps (full reboot on wake, BLE links drop and auto-reconnect).
+//   Suppressed while a take is recording — see Menu::takeActive().
+#define IDLE_SCREEN_OFF_MS (30UL * 1000)          // 30 s inactivity -> backlight off
+#define IDLE_DEEPSLEEP_MS  (20UL * 60 * 1000)     // 20 min inactivity -> deep sleep
+#define DAILY_CHECK_SEC    (24UL * 60 * 60)       // wake once a day to check battery
+#define BATT_CRITICAL_PCT  10
 
 // --- Misc ---
 #define SERIAL_BAUD    115200

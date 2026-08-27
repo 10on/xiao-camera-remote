@@ -38,7 +38,7 @@ Code is split: `src/menu.cpp` (state machine + input), `src/menu_render.cpp`
 | 2 / 3 Connecting | `Screen::Connecting` / `renderConnecting()` — `MAIN` row boxed + separated from `SECONDARY`/`CAMERAS`, progress bar, 25 s → `NO RESPONSE` + retry. `Menu::update()` auto-advances to Control when Main (or, Main-less, a phone) links |
 | 4 / 5 / 8 Control | `renderControlMotion()` — identity chip, state pill, `SPEED n /max` numeral + `Device::speedLevel()` 8-seg bar, bottom action block. **Two modes by Main type:** a **program-driven** Main (slider — has `Device::programName()`) shows the program name + E1/E2 endstop telemetry, no jog arrows; all 4 arrows adjust program speed; the state pill is real telemetry (`Device::motionStateText()` → `IDLE`/`RUNNING`/`MANUAL`/`HOMING`/`ERROR`); when there's no camera, `OK` is the program's explicit `START`/`STOP`; `inFault()` swaps the block to `FAULT - HOLD OK TO CLEAR` (long-Ok → `Command::ResetFault`). A **legacy** Main (dolly) keeps travel triangles + arrow jog per the axis-binding setting, `HOME` pill iff `supportsHome()`, locally-tracked `IDLE`/`RUN >`/`RUN <`. |
 | 6 / 7 Take | same screen, red timer block (`MM:SS`, `* REC`, `n/m CAM`) + `! A CAMERA LOST LINK` yellow strip; Main controls stay live |
-| 9 Cameras-only | `renderControlCamerasOnly()` — phone rows + big `OK - REC` box / centred timer |
+| 9 Cameras-only | `renderControlCamerasOnly()` — one row per connected phone (`Phone 1..n`) + a `LINKING` row while waiting, `CAM n/m` in the header, big `OK - REC` box / centred timer |
 | 10 Main lost | `renderMainLost()` (overlay on Control, Main loss **outside** a take only); `Menu::update()` auto-fires E-Stop + StopRecord if the link drops mid-take (§4) |
 | 11–13 Rig editor | `Screen::Editor` — 4 steps: name (→ TextEntry), Main (motion devices + None), Secondary (camera checkboxes, `>` toggles), take mode. `saveEditor()` → `rigStore` |
 | 14 Settings | `renderSettings()` — Configs / Devices / Control / Screen / System, brightness mini-bar on the Screen row |
@@ -70,17 +70,33 @@ notify), never faked F/B. `Rig` take: `RecordAndMoveMain` sends
 calibration / current belong on a future **Advanced/Service** screen (not
 built) — on entry it must send Program `STOP`, on exit `SELECT`.
 
+**Multiple phones (2026-08-28):** `PhoneDevice` is now multi-peer — the
+one phone slot holds up to `kMaxPhones` (3) bonded phones connected at
+once; `_consumerInput->notify()` fans a shutter report to all subscribers
+in one call, so `REC`/`STOP REC` hit every phone. `Device::cameraReady()`/
+`cameraTotal()` drive the `CAM n/m` counts; `PhoneDevice::markTakeStart()`
+holds `total` at the take's peak so a phone dropping mid-take reads `1/2`.
+`platformio.ini`: `CONFIG_BT_NIMBLE_MAX_CONNECTIONS=4` (slider + dolly + 2
+phones). The old single-peer "quick switch" is removed. **HID-over-GATT to
+multiple hosts is an unproven path — bench-test an iPhone + Android both
+holding the link and triggering.**
+
+**Two-stage idle (2026-08-28, `main.cpp` + `config.h`):** stage 1 —
+`IDLE_SCREEN_OFF_MS` (30 s) of no button activity → backlight off,
+rendering paused, BLE/`menu.update()` keep running; any button wakes the
+screen and that first press is consumed. Stage 2 — `IDLE_DEEPSLEEP_MS`
+(20 min) → `enterDeepSleep()` (full reboot on wake, links auto-reconnect),
+suppressed while `menu.takeActive()`.
+
 **Deferred:** an Advanced/Service screen for the slider (manual jog,
-go-to-position, current, home calibration); multiple phones + BLE HID multi-host validation (the `Phones`
-rig currently binds one phone); real device registration from the Scan
-screen (needs dynamic drivers); turntable driver; a dedicated
-battery/charge screen; sleep controls under Screen prefs; pictogram device
-icons (chips still use the 2-letter `abbrev()`).
+go-to-position, current, home calibration); real device registration from
+the Scan screen (needs dynamic drivers); turntable driver; a dedicated
+battery/charge screen; Cyrillic font.
 
 **Still in force from `requirements-v14`:** emergency stop = long-Ok →
-broadcast stop (§9); device-side motion watchdog ~2 s (§9); deep sleep as
-the rest state + "first press only wakes" (§7); phone record indication is
-about the *take* / command delivery, never a confirmed-recording claim (§2).
+broadcast stop (§9); device-side motion watchdog ~2 s (§9); phone record
+indication is about the *take* / command delivery, never a
+confirmed-recording claim (§2).
 
 **Brightness control (`Яркость`) is implemented**, via `src/settings.h`
 (persisted 0–255 value) and `Display::setBrightness()`

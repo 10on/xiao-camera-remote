@@ -24,7 +24,8 @@ inline Device *rigMainOf(int rigIndex) {
 	return deviceAt(r->mainIndex); // deviceAt(-1) -> nullptr
 }
 
-// (ready, total) camera phones in a rig's Secondary list.
+// (ready, total) cameras in a rig's Secondary list. A single phone slot can
+// represent several connected phones (Device::cameraReady/cameraTotal).
 inline void rigPhoneCounts(int rigIndex, int &ready, int &total) {
 	ready = total = 0;
 	const Rig *r = rigAt(rigIndex);
@@ -32,8 +33,8 @@ inline void rigPhoneCounts(int rigIndex, int &ready, int &total) {
 	for (int i = 0; i < r->secondaryCount; i++) {
 		Device *d = deviceAt(r->secondary[i]);
 		if (!d || d->kind() != DeviceKind::Camera) continue;
-		total++;
-		if (d->isConnected()) ready++;
+		ready += d->cameraReady();
+		total += d->cameraTotal();
 	}
 }
 

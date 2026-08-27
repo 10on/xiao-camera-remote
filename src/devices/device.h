@@ -55,6 +55,13 @@ public:
 	virtual bool endstop1() const { return false; }
 	virtual bool endstop2() const { return false; }
 
+	// Camera devices: how many recorders this one slot currently represents
+	// (a phone driver can hold several simultaneously). ready <= total; total
+	// stays at the take's peak while recording so a mid-take drop shows as
+	// "1/2". Non-camera devices leave these at 0.
+	virtual int cameraReady() const { return 0; }
+	virtual int cameraTotal() const { return 0; }
+
 	// Identity for the device-list row: a 2-letter abbreviation (Latin for
 	// now — see docs/screen-design.md's "Cyrillic text" note, the design's
 	// actual Cyrillic copy needs a custom font that isn't built yet) and

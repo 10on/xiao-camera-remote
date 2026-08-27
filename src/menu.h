@@ -24,6 +24,7 @@ public:
 	void render();
 	void renderDynamic();
 	void updateStatusLed();
+	bool takeActive() const { return _takeActive; } // suppresses stage-2 deep sleep
 
 private:
 	enum class Screen {

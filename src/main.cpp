@@ -147,24 +147,44 @@ void loop() {
 	statusLed.update();
 	deviceRegistry.tick();
 
+	uint32_t now = millis();
+	static uint32_t lastActivityMs = millis(); // boot counts as activity
+	static bool screenOff = false;
+
 	// Session transitions that happen without a button press: a rig's Main
 	// finishing its connection (Connecting -> Control), or its link dropping
 	// (control -> lost-Main takeover, plus an auto E-Stop if mid-take).
 	// Returns true when the screen needs the full redraw render() does.
 	bool dirty = menu.update();
+	bool woke = false;
 
 	for (ButtonId id : kAllButtons) {
 		ButtonEvent ev = buttons.poll(id);
 		if (ev == ButtonEvent::None) continue;
 
 		if (id == ButtonId::Ok && ignoreNextOkEvent) {
-			ignoreNextOkEvent = false; // the wake-up press — consume silently
+			ignoreNextOkEvent = false; // the deep-sleep wake press — consume silently
+			continue;
+		}
+
+		lastActivityMs = now;
+		if (screenOff || woke) {
+			// Stage-1 wake: this press only lights the screen back up (v14 §7).
+			screenOff = false;
+			woke = true;
 			continue;
 		}
 
 		if (settings.buttonSound()) buzzer.beep(); // tactile/audio confirmation
 		menu.handleButton(id, ev);
 		dirty = true;
+	}
+	if (woke) {
+		display.setBrightness(settings.brightness());
+		dirty = true;
+	} else if (!screenOff && lastActivityMs != 0 && now - lastActivityMs > IDLE_SCREEN_OFF_MS) {
+		screenOff = true;
+		display.setBrightness(0);
 	}
 
 	// A full render() does a fillScreen() first — needed when navigating to
@@ -181,26 +201,25 @@ void loop() {
 	bool otaChanged = ota.state() != lastOtaState;
 	lastOtaState = ota.state();
 
+	menu.updateStatusLed(); // cheap; keeps LEDs live even with the screen off
+
+	// Stage 1: screen dark -> pause all rendering, but keep BLE / menu.update()
+	// running so the session catches up the moment the screen wakes.
 	static const uint32_t kDynamicRenderMs = 300;
 	static uint32_t lastRender = 0;
-	uint32_t now = millis();
-	if (dirty || otaChanged) {
-		menu.updateStatusLed();
-		menu.render();
-		lastRender = now;
-	} else if (now - lastRender > kDynamicRenderMs) {
-		menu.updateStatusLed();
-		menu.renderDynamic();
-		lastRender = now;
+	if (!screenOff) {
+		if (dirty || otaChanged) {
+			menu.render();
+			lastRender = now;
+		} else if (now - lastRender > kDynamicRenderMs) {
+			menu.renderDynamic();
+			lastRender = now;
+		}
 	}
 
-	// Deep sleep after IDLE_DEEPSLEEP_MS of no button activity at all
-	// (v14 §7 stage 2). Any button event resets the idle clock.
-	static uint32_t lastActivityMs = 0;
-	if (dirty) {
-		lastActivityMs = now;
-	}
-	if (now - lastActivityMs > IDLE_DEEPSLEEP_MS) {
+	// Stage 2: deep sleep after IDLE_DEEPSLEEP_MS of no button activity —
+	// unless a take is recording (BLE must stay up for STOP / E-Stop).
+	if (now - lastActivityMs > IDLE_DEEPSLEEP_MS && !menu.takeActive()) {
 		enterDeepSleep(); // does not return
 	}
 }
