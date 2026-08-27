@@ -1,18 +1,37 @@
 #include "led.h"
-#include "config.h"
+#include "pcf8575.h"
 
 StatusLed statusLed;
 
-StatusLed::StatusLed() : _pixel(RGB_LED_COUNT, PIN_RGB_LED, NEO_GRB + NEO_KHZ800) {}
+static const uint32_t kBlinkIntervalMs = 400;
 
 void StatusLed::begin() {
-	_pixel.begin();
-	_pixel.setBrightness(RGB_LED_BRIGHTNESS);
-	off();
-	_pixel.show();
+	apply(_power, false);
+	apply(_activity, false);
 }
 
-void StatusLed::set(uint8_t r, uint8_t g, uint8_t b) {
-	_pixel.setPixelColor(0, _pixel.Color(r, g, b));
-	_pixel.show();
+void StatusLed::setPower(bool on, bool blink) {
+	_power.on = on;
+	_power.blink = blink;
+}
+
+void StatusLed::setActivity(bool on, bool blink) {
+	_activity.on = on;
+	_activity.blink = blink;
+}
+
+void StatusLed::apply(const Channel &ch, bool lit) {
+	// Active-LOW: driving the pin low sinks current through the LED.
+	pcf8575.writeBit(ch.pcfBit, !lit);
+}
+
+void StatusLed::update() {
+	uint32_t now = millis();
+	if (now - _lastBlinkMs >= kBlinkIntervalMs) {
+		_lastBlinkMs = now;
+		_blinkPhase = !_blinkPhase;
+	}
+
+	apply(_power, _power.on && (!_power.blink || _blinkPhase));
+	apply(_activity, _activity.on && (!_activity.blink || _blinkPhase));
 }

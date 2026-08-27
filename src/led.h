@@ -1,20 +1,36 @@
 #pragma once
 
-#include <Adafruit_NeoPixel.h>
+#include <Arduino.h>
 
-// Single WS2812 status pixel — freed up by tying the display's CS
-// straight to GND instead of a GPIO (see config.h).
+#include "config.h"
+
+// Two discrete LEDs on the PCF8575 expander (WS2812 was dropped — not in
+// stock, see docs/hardware.md): yellow = power/battery, blue = workflow/
+// activity. Both are wired active-LOW (PCF8575 sinks current far better
+// than it sources it — see docs/hardware.md), and the expander can't do
+// PWM, so there's no dimming — only on/off/blink.
 class StatusLed {
 public:
-	StatusLed();
-
 	void begin();
+	void update(); // drives blink timing; call every loop iteration
 
-	void set(uint8_t r, uint8_t g, uint8_t b);
-	void off() { set(0, 0, 0); }
+	void setPower(bool on, bool blink = false);
+	void setActivity(bool on, bool blink = false);
 
 private:
-	Adafruit_NeoPixel _pixel;
+	struct Channel {
+		explicit Channel(uint8_t bit) : pcfBit(bit) {}
+		uint8_t pcfBit;
+		bool on = false;
+		bool blink = false;
+	};
+
+	void apply(const Channel &ch, bool lit);
+
+	Channel _power{PCF_BIT_LED_YELLOW};
+	Channel _activity{PCF_BIT_LED_BLUE};
+	uint32_t _lastBlinkMs = 0;
+	bool _blinkPhase = false;
 };
 
 extern StatusLed statusLed;

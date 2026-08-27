@@ -11,7 +11,7 @@ public:
 
 	// Non-blocking: starts a tone and remembers when to stop it in
 	// update(), so callers never block the UI loop waiting on a beep.
-	void beep(uint32_t freqHz = 2000, uint32_t durationMs = 40);
+	void beep(uint32_t freqHz = 2500, uint32_t durationMs = 40);
 	void update();
 
 private:

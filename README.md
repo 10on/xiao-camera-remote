@@ -16,6 +16,13 @@ it in `src/menu.cpp`.
 ## Hardware
 See `docs/hardware.md` for pinout and module notes.
 
+## Screen design
+See `docs/screen-design.md` for the color system, typography, and
+geometry the UI is built from, and which of the 7 designed screen states
+are implemented vs. still blocked on a missing profiles/bindings model or
+on hardware (brightness control). Original handoff bundle archived in
+`docs/design/`.
+
 ## Build
 ```
 make build      # pio run
@@ -119,7 +126,16 @@ Freed up the pins by not wiring the display's CS/RST to a GPIO (see
 beep on every button press — confirmation that a blind press registered.
 
 ## Known gaps vs. the requirements doc
-Not yet implemented (tracked in `~/Downloads/filming-remote-requirements.md`):
-persistent storage of known devices + auto-reconnect after power-cycle,
-idle screen-off while keeping BLE alive, emergency stop, phone/dolly
-drivers.
+Requirements doc is now v4 (`docs/design/requirements-v4.md`, mirrored to
+`~/Downloads/filming-remote-requirements.md`). Resolved since v3: phone
+control is BLE HID (peripheral role, emulates a headset button — pult
+must be BLE dual-role, central to slider/dolly and peripheral to phone at
+once), a product turntable is now a planned device (recommended to share
+a `MotionAxisDriver` family with the slider), and profiles/bindings are
+decided-but-not-built (structure in the doc's §3, no NVS storage or
+editor yet — see `docs/screen-design.md`).
+
+Not yet implemented: persistent storage of known devices + auto-reconnect
+after power-cycle, idle screen-off while keeping BLE alive, emergency
+stop, phone/dolly/turntable drivers, profiles/bindings storage and UI,
+backlight brightness control (needs a repin, see `docs/hardware.md`).

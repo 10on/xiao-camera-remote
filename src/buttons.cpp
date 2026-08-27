@@ -1,27 +1,42 @@
 #include "buttons.h"
 #include "config.h"
+#include "pcf8575.h"
 
 Buttons buttons;
 
-static const uint8_t kPins[] = {
-	PIN_BTN_UP, PIN_BTN_DOWN, PIN_BTN_LEFT, PIN_BTN_RIGHT, PIN_BTN_OK,
-};
-
 void Buttons::begin() {
+	pinMode(PIN_BTN_OK, INPUT_PULLUP);
 	for (size_t i = 0; i < static_cast<size_t>(ButtonId::Count); i++) {
-		_btn[i].pin = kPins[i];
-		pinMode(_btn[i].pin, INPUT_PULLUP);
 		_btn[i].stableLevel = true;
 		_btn[i].lastRaw = true;
+	}
+}
+
+bool Buttons::readRaw(ButtonId id) const {
+	switch (id) {
+	case ButtonId::Up:    return (_expanderBits & (1 << PCF_BIT_BTN_UP)) != 0;
+	case ButtonId::Down:  return (_expanderBits & (1 << PCF_BIT_BTN_DOWN)) != 0;
+	case ButtonId::Left:  return (_expanderBits & (1 << PCF_BIT_BTN_LEFT)) != 0;
+	case ButtonId::Right: return (_expanderBits & (1 << PCF_BIT_BTN_RIGHT)) != 0;
+	case ButtonId::Ok:    return digitalRead(PIN_BTN_OK) != 0;
+	default:              return true;
 	}
 }
 
 void Buttons::update() {
 	uint32_t now = millis();
 
+	// Only re-read the expander over I2C when its INT line says something
+	// changed — avoids constant I2C traffic/latency from polling every
+	// loop tick (see docs/hardware.md). Ok/center doesn't need this, it's
+	// a plain GPIO read.
+	if (pcf8575.changed()) {
+		_expanderBits = pcf8575.read();
+	}
+
 	for (size_t i = 0; i < static_cast<size_t>(ButtonId::Count); i++) {
 		State &b = _btn[i];
-		bool raw = digitalRead(b.pin);
+		bool raw = readRaw(static_cast<ButtonId>(i));
 
 		if (raw != b.lastRaw) {
 			b.lastRaw = raw;
