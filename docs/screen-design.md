@@ -36,7 +36,7 @@ Code is split: `src/menu.cpp` (state machine + input), `src/menu_render.cpp`
 |---|---|
 | 1 / 16 / 17 Configurations | `Screen::Rigs` / `renderRigs()` — 3-row window over `rigStore`, green "last-used" plate with `LAST` tag + `SL + PH` composition, scrollbar, empty-state. Ok launches, `>` → RigMenu, hold-`<` → Settings |
 | 2 / 3 Connecting | `Screen::Connecting` / `renderConnecting()` — `MAIN` row boxed + separated from `SECONDARY`/`CAMERAS`, progress bar, 25 s → `NO RESPONSE` + retry. `Menu::update()` auto-advances to Control when Main (or, Main-less, a phone) links |
-| 4 / 5 / 8 Control | `renderControlMotion()` — **one fixed mapping for every motion Main** (2026-08-28, Denis: it was over-engineered): `↑↓` = speed, `←→` = drive that direction (same key again or `OK` = stop, opposite = reverse). No axis-binding setting. Screen: identity chip, plain state word (`STOPPED`/`FWD`/`BACK`/`RUNNING`/`HOMING`/`ERROR` — device telemetry wins over the locally-tracked jog state), one big speed numeral, one big direction arrow (pause bars stopped), `Device::speedLevel()` 8-seg bar, one action block: `OK - REC` (`n CAM`) with a phone / `OK - START`\|`STOP` for a program device with no phone / plain `OK - STOP` otherwise / `HOLD OK TO CLEAR ERROR` on `inFault()` (long-Ok → `Command::ResetFault`). Per-device `DeviceRegistry::invertDir()` (device card "Flip L/R") swaps `←`/`→` — an `F`/`B` protocol is motor-relative. |
+| 4 / 5 / 8 Control | `renderControlMotion()` — **one fixed mapping for every motion Main** (2026-08-28, Denis: it was over-engineered): `↑↓` = speed, `←→` = drive that direction (same key again or `OK` = stop, opposite = reverse). No axis-binding setting. Screen: identity chip, plain state word (`STOPPED`/`FWD`/`BACK`/`RUNNING`/`HOMING`/`ERROR` — device telemetry wins over the locally-tracked jog state), one big speed numeral (percent of full scale, `Device::speedPercent()` — 2026-08-29, Denis: was a 1..8 level, but the slider's native unit is 1..100% and the remote's own 8-step scale fought the slider's 10Hz speed echo; arrows now step 10% and every device reports a percent), one big direction arrow (pause bars stopped), 8-seg bar (fill = `speedPercent()` rounded to eighths), one action block: `OK - REC` (`n CAM`) with a phone / `OK - START`\|`STOP` for a program device with no phone / plain `OK - STOP` otherwise / `HOLD OK TO CLEAR ERROR` on `inFault()` (long-Ok → `Command::ResetFault`). Per-device `DeviceRegistry::invertDir()` (device card "Flip L/R") swaps `←`/`→` — an `F`/`B` protocol is motor-relative. |
 | 6 / 7 Take | same screen, red timer block (`MM:SS`, `* REC`, `n/m CAM`) + `! A CAMERA LOST LINK` yellow strip; Main controls stay live |
 | 9 Cameras-only | `renderControlCamerasOnly()` — one row per connected phone (`Phone 1..n`) + a `LINKING` row while waiting, `CAM n/m` in the header, big `OK - REC` box / centred timer |
 | 10 Main lost | `renderMainLost()` (overlay on Control, Main loss **outside** a take only); `Menu::update()` auto-fires E-Stop + StopRecord if the link drops mid-take (§4) |
@@ -48,7 +48,7 @@ Code is split: `src/menu.cpp` (state machine + input), `src/menu_render.cpp`
 | 18 Rig menu | `Screen::RigMenu` — Edit / Duplicate / Rename / Delete (`rigStore` CRUD) |
 | 19 Name entry | `Screen::TextEntry` — block cursor + letter ribbon, 5-button; shared by editor step 1, rig rename, device rename |
 | 20 Scan | `Screen::Scan` — one-shot `NimBLEScan` (guarded: only with no live session), lists name + RSSI. "Add to registry" is a no-op stub — dynamic drivers are a later phase |
-| 22 Control prefs | `Screen::ControlPrefs` — Axes toggle, Max speed (`settings.maxSpeedLevel()` cap), Autostart last, Key sound; `←→` changes value |
+| 22 Control prefs | `Screen::ControlPrefs` — Axes toggle, Max speed (`settings.maxSpeedPercent()` cap, 10..100% in 10% steps), Autostart last, Key sound; `←→` changes value |
 | 23 System | `Screen::System` — firmware, battery V, OTA (confirm modal), Factory reset (`settings.factoryReset()` + `ESP.restart()`) |
 | OTA active | `renderOtaActive()` — real STA-mode SSID/IP, not the mock's fixed AP |
 | 24 Turntable | not built — no turntable driver yet |
@@ -58,9 +58,10 @@ secondaryCount, takeMode }`, mutable. `src/rig_store.*` — NVS blob
 (versioned), seeds ux-redesign.md §5 defaults, CRUD for the editor.
 `src/device_table.*` — the stable `deviceAt()/deviceCount()/deviceIndexOf()`
 identity used by rigs. `src/device_registry.*` — per-device alias (NVS) +
-coarse `SeenState`. `Device::kind()` / `supportsHome()` / `speedLevel()` /
-`speedLevelMax()`. `src/settings.*` gains `axisBinding`, `autostartLastRig`,
-`maxSpeedLevel`, `buttonSound`; old `profile`/`binding` NVS keys abandoned.
+coarse `SeenState`. `Device::kind()` / `supportsHome()` / `speedPercent()`.
+`src/settings.*` gains `axisBinding`, `autostartLastRig`,
+`maxSpeedPercent`, `buttonSound`; old `profile`/`binding` NVS keys abandoned,
+`maxspd` key renamed to `maxspdpct`.
 
 **Slider program API (2026-08-28):** migrated to the slider repo's
 `docs/11_program_api.md` model — the pult drives the **Ping-Pong program**

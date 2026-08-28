@@ -261,6 +261,7 @@ void DollyDevice::renderStatusLine(Adafruit_GFX &tft, int16_t y) {
 		tft.setTextColor(theme::kWarnFill);
 		tft.print("Dolly: syncing...");
 	} else {
-		tft.printf("Dolly: %s S%u", _moving ? (_dirRight ? "fwd" : "back") : "idle", _speedLevel);
+		tft.printf("Dolly: %s %u%%", _moving ? (_dirRight ? "fwd" : "back") : "idle",
+		           _speedLevel * 20);
 	}
 }

@@ -158,7 +158,7 @@ void TurntableDevice::renderStatusLine(Adafruit_GFX &tft, int16_t y) {
 		tft.printf("%s: %s", name(), _active ? "connecting..." : "off");
 		return;
 	}
-	tft.printf("%s: %s %s S%u/%u", name(), motionStateText(),
-	           _dirForward ? "fwd" : "rev", _speedIdx + 1, _speedCount);
+	tft.printf("%s: %s %s %d%%", name(), motionStateText(),
+	           _dirForward ? "fwd" : "rev", speedPercent());
 	if (_battPct != 0xFF) tft.printf(" %u%%", _battPct);
 }

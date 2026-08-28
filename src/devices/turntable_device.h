@@ -13,8 +13,10 @@ public:
 	const char *advertisedName() const override { return "Turntable"; }
 	DeviceKind kind() const override { return DeviceKind::Motion; }
 	bool supportsHome() const override { return false; }
-	int speedLevel() const override { return _speedIdx + 1; }
-	int speedLevelMax() const override { return _speedCount ? _speedCount : 4; }
+	int speedPercent() const override {
+		uint8_t n = _speedCount ? _speedCount : 4;
+		return (_speedIdx + 1) * 100 / n;
+	}
 	bool inFault() const override { return _state == 3; }
 	const char *motionStateText() const override;
 	const char *abbrev() const override { return "TT"; } // "СТ" in the design; custom font not built (see slider docs/screen-design.md)

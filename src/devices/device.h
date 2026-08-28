@@ -35,10 +35,11 @@ public:
 	// dolly no; see ux-redesign.md §7).
 	virtual bool supportsHome() const { return false; }
 
-	// Motion devices report speed as a 1..max level for the control screen's
-	// numeral + segment bar (mock screen 4: "4 /8"). 0 = no speed concept.
-	virtual int speedLevel() const { return 0; }
-	virtual int speedLevelMax() const { return 0; }
+	// Motion devices report speed as a percentage 1..100 for the control screen's
+	// numeral ("57%") + 8-segment bar. 0 = no speed concept.
+	// Devices with a coarse internal scale (dolly's 5 packets, turntable's N
+	// firmware-defined steps) still present it as a percentage here.
+	virtual int speedPercent() const { return 0; }
 	// Selected device-owned program shown on the control screen. nullptr means this
 	// device only exposes direct/manual motion (see slider docs/11_program_api.md:
 	// the pult drives the *program*, not motor direction).

@@ -1,4 +1,7 @@
 #include "slider_device.h"
+
+#include <math.h>
+
 #include "../theme.h"
 
 SliderDevice sliderDevice;
@@ -87,8 +90,9 @@ void SliderDevice::beginGattConnection(const NimBLEAdvertisedDevice *adv) {
 	}
 
 	// Select the slider-owned default without overwriting its saved parameters.
+	// Program notify fills _speedPercent with the slider's real cfg.speed.
 	if (_chProgram) sendProgram(kProgramSelect);
-	else sendSpeed(_speedUs); // compatibility with older slider firmware
+	else sendSpeed(_speedPercent); // compatibility with older slider firmware
 }
 
 void SliderDevice::onConnect(NimBLEClient *) {
@@ -119,11 +123,16 @@ void SliderDevice::sendCommand(char cmd) {
 	}
 }
 
-void SliderDevice::sendSpeed(uint16_t usPerStep) {
-	usPerStep = constrain(usPerStep, (uint16_t)100, (uint16_t)5000);
-	_speedUs = usPerStep;
+// Legacy Speed characteristic (firmware without the Program API): 2-byte uint16
+// step interval in us.  Convert percent -> interval with the same geometric curve
+// the slider uses internally (config.cpp speedToInterval): every +1% multiplies
+// step frequency by a constant ratio, so the dial stays perceptually linear.
+void SliderDevice::sendSpeed(uint8_t percent) {
+	percent = constrain(percent, (uint8_t)1, (uint8_t)100);
+	float t = (percent - 1) / 99.0f;
+	uint16_t interval = (uint16_t)lroundf(5000.0f * powf(100.0f / 5000.0f, t));
 	if (_chSpeed) {
-		_chSpeed->writeValue(reinterpret_cast<uint8_t *>(&_speedUs), 2, false);
+		_chSpeed->writeValue(reinterpret_cast<uint8_t *>(&interval), 2, false);
 	}
 }
 
@@ -134,21 +143,26 @@ void SliderDevice::sendProgram(uint8_t action, uint8_t speedPercent,
 	_chProgram->writeValue(packet, sizeof(packet), false);
 }
 
-void SliderDevice::setSpeedLevel(uint8_t level) {
-	_speedLevel = constrain(level, (uint8_t)1, (uint8_t)8);
-	uint8_t percent = 1 + ((uint32_t)(_speedLevel - 1) * 99 / 7);
-	if (_chProgram) {
-		// Normal UI tuning belongs to the selected preset, not to the advanced motor API.
-		sendProgram(kProgramConfigure, percent);
-	} else {
-		// Compatibility with older slider firmware: level 1 = 5000us, level 8 = 100us.
-		uint16_t interval = 5000 - ((uint32_t)(_speedLevel - 1) * 4900 / 7);
-		sendSpeed(interval);
-	}
+// One arrow press = one 10% step on the slider's native 1..100% scale.  We snap
+// to the 10% grid first so a press is always predictable even when the slider is
+// sitting on an odd value set from its own menu.  The slider's geometric curve
+// turns each 10% into a ~1.5x speed change — coarse but even end to end.
+void SliderDevice::nudgeSpeed(int delta) {
+	int p = _speedPercent;
+	if (delta > 0)      p = (p / 10) * 10 + 10;
+	else if (delta < 0) p = (p - 1) / 10 * 10;
+	_speedPercent = (uint8_t)constrain(p, 10, 100);
+
+	// Trust our own value over the slider's echo until the CONFIGURE round-trips;
+	// the slider notifies cfg.speed at 10Hz and the stale value would bounce the UI.
+	_speedEchoMuteUntilMs = millis() + 600;
+
+	if (_chProgram) sendProgram(kProgramConfigure, _speedPercent);
+	else sendSpeed(_speedPercent);
 }
 
-int SliderDevice::speedLevel() const {
-	return _speedLevel;
+int SliderDevice::speedPercent() const {
+	return _speedPercent;
 }
 
 const char *SliderDevice::motionStateText() const {
@@ -179,8 +193,10 @@ void SliderDevice::onProgramNotify(const uint8_t *data, size_t len) {
 	if (len < 6 || data[0] != 1) return;
 	_program = data[1];
 	_programRunning = data[2] != 0;
-	uint8_t percent = constrain(data[3], (uint8_t)1, (uint8_t)100);
-	_speedLevel = 1 + ((uint32_t)(percent - 1) * 7 + 49) / 99;
+	// data[3] is the slider's live cfg.speed (1..100%).  Adopt it unless a local
+	// nudge is still in flight — see nudgeSpeed().
+	if ((int32_t)(millis() - _speedEchoMuteUntilMs) >= 0)
+		_speedPercent = constrain(data[3], (uint8_t)1, (uint8_t)100);
 	_programCaps = data[5];
 	if (len >= 7) _state = data[6];
 	if (len >= 8) _error = data[7];
@@ -228,10 +244,10 @@ void SliderDevice::handleCommand(Command cmd) {
 		sendCommand('H');
 		break;
 	case Command::SpeedUp:
-		setSpeedLevel(_speedLevel + 1);
+		nudgeSpeed(+1);
 		break;
 	case Command::SpeedDown:
-		setSpeedLevel(_speedLevel - 1);
+		nudgeSpeed(-1);
 		break;
 	case Command::StartProgram:
 		if (_chProgram) sendProgram(kProgramStart);
@@ -258,8 +274,8 @@ void SliderDevice::renderStatusLine(Adafruit_GFX &tft, int16_t y) {
 		tft.printf("%s: %s", name(), _active ? "connecting..." : "off");
 		return;
 	}
-	tft.printf("%s: %s %s S%u%s%s", name(), programName(),
+	tft.printf("%s: %s %s %u%%%s%s", name(), programName(),
 	           _programRunning ? "RUN" : "IDLE",
-	           _speedLevel,
+	           _speedPercent,
 	           (_flags & 0x01) ? " E1" : "", (_flags & 0x02) ? " E2" : "");
 }

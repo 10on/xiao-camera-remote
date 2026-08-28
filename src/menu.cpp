@@ -543,10 +543,10 @@ void Menu::handleControlButton(ButtonId id, ButtonEvent ev) {
 	// left/right = drive that way (press again or Ok = stop, opposite =
 	// reverse). No axis-binding choice, no manual-vs-program split on the
 	// arrows — a program device just ignores a jog it can't accept.
-	const int cap = settings.maxSpeedLevel();
+	const int cap = settings.maxSpeedPercent();
 	auto speed = [&](bool up) {
 		if (up) {
-			if (m->speedLevel() == 0 || m->speedLevel() < cap) m->handleCommand(Command::SpeedUp);
+			if (m->speedPercent() == 0 || m->speedPercent() < cap) m->handleCommand(Command::SpeedUp);
 		} else {
 			m->handleCommand(Command::SpeedDown);
 		}
@@ -702,7 +702,7 @@ void Menu::handleControlPrefsButton(ButtonId id, ButtonEvent ev) {
 		case ButtonId::Right: {
 			int dir = id == ButtonId::Right ? 1 : -1;
 			if (_ctrlPrefCursor == 0)
-				settings.setMaxSpeedLevel((uint8_t)(settings.maxSpeedLevel() + dir));
+				settings.setMaxSpeedPercent((uint8_t)(settings.maxSpeedPercent() + dir * 10));
 			else if (_ctrlPrefCursor == 1)
 				settings.setAutostartLastRig(!settings.autostartLastRig());
 			else

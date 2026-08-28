@@ -11,8 +11,7 @@ public:
 	const char *advertisedName() const override { return "Camera_Slider"; }
 	DeviceKind kind() const override { return DeviceKind::Motion; }
 	bool supportsHome() const override { return true; }
-	int speedLevel() const override;
-	int speedLevelMax() const override { return 8; }
+	int speedPercent() const override;
 	const char *programName() const override { return _chProgram ? "PING PONG" : nullptr; }
 	bool programRunning() const override { return _programRunning; }
 	bool inFault() const override { return _error != 0 || _state == 5; }
@@ -41,10 +40,10 @@ public:
 
 private:
 	void sendCommand(char cmd);
-	void sendSpeed(uint16_t usPerStep);
+	void sendSpeed(uint8_t percent); // legacy Speed char (pre-Program firmware)
 	void sendProgram(uint8_t action, uint8_t speedPercent = 0, uint8_t startPoint = 0xFF,
 	                 uint8_t flags = 0);
-	void setSpeedLevel(uint8_t level);
+	void nudgeSpeed(int delta);
 	void onStatusNotify(const uint8_t *data, size_t len);
 	void onProgramNotify(const uint8_t *data, size_t len);
 
@@ -69,8 +68,12 @@ private:
 	uint8_t _programCaps = 0;
 	bool _programRunning = false;
 
-	uint8_t _speedLevel = 4;
-	uint16_t _speedUs = 2900; // level 4/8 mapped onto the protocol's 5000..100us range
+	// Speed as the slider's own unit: 1..100%. Mirrors cfg.speed from the Program
+	// notify, except for a short window after a local nudge (_speedEchoMuteUntilMs)
+	// where the in-flight CONFIGURE hasn't round-tripped yet and the stale echo
+	// would otherwise fight the user's press.
+	uint8_t _speedPercent = 50; // matches the slider's configDefaults()
+	uint32_t _speedEchoMuteUntilMs = 0;
 };
 
 extern SliderDevice sliderDevice;

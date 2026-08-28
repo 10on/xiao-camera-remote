@@ -552,7 +552,8 @@ void Menu::renderControlMotion(const Rig &r) {
 
 	const int16_t PAD = theme::kPadH;
 	const int16_t W = t.width() - 2 * PAD;
-	const int lvl = m->speedLevel(), mx = m->speedLevelMax();
+	const int pct = m->speedPercent();
+	const int segFill = (pct * 8 + 50) / 100; // 8-segment bar, rounded
 	const bool prog = m->programName() != nullptr;
 	const bool fault = m->inFault();
 
@@ -600,7 +601,7 @@ void Menu::renderControlMotion(const Rig &r) {
 		snprintf(cc, sizeof(cc), "* %d/%d CAM", ready, total);
 		text(t.width() - PAD - 14, by + bh / 2, cc, theme::kRecordText, AlignR);
 
-		segBar(PAD, 136, W, lvl, mx, m->identityColor565(), 8);
+		segBar(PAD, 136, W, segFill, 8, m->identityColor565(), 8);
 
 		t.fillRoundRect(PAD, 162, W, 36, 11, theme::kRecordFill);
 		centerText("OK - STOP", 162 + 18, theme::kRecordText, &FreeSansBold12pt7b);
@@ -608,10 +609,10 @@ void Menu::renderControlMotion(const Rig &r) {
 		return;
 	}
 
-	// --- Big speed numeral (left) ---
+	// --- Big speed numeral (left), percent of full scale ---
 	text(PAD, 62, "SPEED", theme::kTextHint);
 	char num[4];
-	snprintf(num, sizeof(num), "%d", lvl);
+	snprintf(num, sizeof(num), "%d", pct);
 	text(PAD + 4, 96, num, theme::kTextPrimary, AlignL, &FreeMonoBold24pt7b);
 	int16_t x1, y1;
 	uint16_t w, h;
@@ -619,9 +620,7 @@ void Menu::renderControlMotion(const Rig &r) {
 	t.setTextSize(1);
 	t.getTextBounds(num, 0, 0, &x1, &y1, &w, &h);
 	t.setFont(nullptr);
-	char den[6];
-	snprintf(den, sizeof(den), "/%d", mx);
-	text(PAD + 4 + (int16_t)w + 6, 104, den, theme::kTextSecondary);
+	text(PAD + 4 + (int16_t)w + 6, 104, "%", theme::kTextSecondary);
 
 	// --- Big direction indicator (right) ---
 	{
@@ -637,7 +636,7 @@ void Menu::renderControlMotion(const Rig &r) {
 		}
 	}
 
-	segBar(PAD, 126, W, lvl, mx, m->identityColor565());
+	segBar(PAD, 126, W, segFill, 8, m->identityColor565());
 
 	// --- Bottom action block (y156) ---
 	const int16_t ry = 156, rh = 40, rcy = ry + rh / 2;
@@ -909,7 +908,7 @@ void Menu::renderControlPrefs() {
 
 	int16_t y = 58;
 	char spd[8];
-	snprintf(spd, sizeof(spd), "%d/8", settings.maxSpeedLevel());
+	snprintf(spd, sizeof(spd), "%d%%", settings.maxSpeedPercent());
 	y += prefRow(y, "Max speed", spd, _ctrlPrefCursor == 0) + 4;
 	y += prefRow(y, "Autostart last", settings.autostartLastRig() ? "ON" : "OFF", _ctrlPrefCursor == 1,
 	             settings.autostartLastRig() ? theme::kOkFill : theme::kTextHint) + 4;

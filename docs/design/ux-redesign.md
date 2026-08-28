@@ -355,9 +355,12 @@
 - `src/device_table.*` — стабильная нумерация устройств (`deviceAt`/
   `deviceCount`/`deviceIndexOf`), на которую ссылаются риги.
 - `src/device_registry.*` — алиас устройства (NVS) + грубый `SeenState`.
-- `Device`: `kind()`, `supportsHome()`, `speedLevel()`, `speedLevelMax()`.
-- `src/settings.*`: `axisBinding`, `autostartLastRig`, `maxSpeedLevel`,
-  `buttonSound`, `factoryReset()`; старые ключи `profile`/`binding` брошены.
+- `Device`: `kind()`, `supportsHome()`, `speedPercent()` (1..100%; была пара
+  `speedLevel()`/`speedLevelMax()` с шкалой 1..8 — 2026-08-29 перешли на проценты,
+  родную единицу слайдера, см. `docs/screen-design.md` строка 4).
+- `src/settings.*`: `axisBinding`, `autostartLastRig`, `maxSpeedPercent`,
+  `buttonSound`, `factoryReset()`; старые ключи `profile`/`binding` брошены,
+  `maxspd` → `maxspdpct`.
 
 Отложено: несколько телефонов (риг `Phones` пока цепляет один); настоящая
 регистрация устройства с экрана `Scan` (нужны динамические драйверы);

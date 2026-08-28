@@ -14,8 +14,7 @@ public:
 	const char *name() const override { return "Dolly"; }
 	const char *advertisedName() const override { return "NEEWER-DL"; }
 	DeviceKind kind() const override { return DeviceKind::Motion; }
-	int speedLevel() const override { return _speedLevel; }
-	int speedLevelMax() const override { return 5; }
+	int speedPercent() const override { return _speedLevel * 20; } // 5 packets -> 20..100%
 	const char *abbrev() const override { return "DL"; } // "ТЖ" in the design
 	uint16_t identityColor565() const override;
 	uint16_t identityTextColor565() const override;

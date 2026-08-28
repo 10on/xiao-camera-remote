@@ -12,7 +12,7 @@ public:
 
 	int rigIndex() const { return _rigIndex; }
 	bool autostartLastRig() const { return _autostartLastRig; }
-	uint8_t maxSpeedLevel() const { return _maxSpeedLevel; } // 1..8 cap on the control screen
+	uint8_t maxSpeedPercent() const { return _maxSpeedPercent; } // 10..100% cap on the control screen
 	bool buttonSound() const { return _buttonSound; }
 	uint8_t brightness() const { return _brightness; }
 
@@ -20,7 +20,7 @@ public:
 	// immediately — these only ever fire from menu button presses.
 	void setRigIndex(int index);
 	void setAutostartLastRig(bool enabled);
-	void setMaxSpeedLevel(uint8_t level);
+	void setMaxSpeedPercent(uint8_t percent);
 	void setButtonSound(bool enabled);
 	void setBrightness(uint8_t value);
 
@@ -30,7 +30,7 @@ public:
 private:
 	int _rigIndex = 0;
 	bool _autostartLastRig = false;
-	uint8_t _maxSpeedLevel = 8;
+	uint8_t _maxSpeedPercent = 100;
 	bool _buttonSound = true;
 	uint8_t _brightness = 200; // bright but not max, matches the old always-on digitalWrite(HIGH)
 };
