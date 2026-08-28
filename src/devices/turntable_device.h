@@ -31,6 +31,7 @@ public:
 	bool canExecuteCommand(Command cmd) const override;
 	void handleCommand(Command cmd) override;
 	void renderStatusLine(Adafruit_GFX &tft, int16_t y) override;
+	bool matchesAdvertisement(const NimBLEAdvertisedDevice *adv) const override;
 	void beginGattConnection(const NimBLEAdvertisedDevice *adv) override;
 
 	// NimBLEClientCallbacks

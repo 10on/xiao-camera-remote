@@ -12,7 +12,7 @@ const char *kKeyBlob = "blob";
 const char *kKeyCount = "count";
 // Bump when the Rig layout changes so a stale blob is discarded, not
 // misread. Stored as the first 4 bytes of the blob.
-const uint32_t kLayoutVersion = 0x52494702; // 'R','I','G',2 — reseed for slider program takeMode
+const uint32_t kLayoutVersion = 0x52494703; // 'R','I','G',3 — reseed with turntable rigs
 } // namespace
 
 // Device indices into menu.cpp kDevices: sliderDevice=0, phoneDevice=1, dollyDevice=2.
@@ -38,8 +38,10 @@ void RigStore::seedDefaults() {
 	_count = 0;
 	_rigs[_count++] = mk("Slider + Phone", 0, {1}, TakeMode::RecordAndMoveMain);
 	_rigs[_count++] = mk("Dolly + Phone", 2, {1}, TakeMode::RecordOnly);
+	_rigs[_count++] = mk("Turntable + Phone", 3, {1}, TakeMode::RecordAndMoveMain);
 	_rigs[_count++] = mk("Slider", 0, {}, TakeMode::RecordAndMoveMain);
 	_rigs[_count++] = mk("Dolly", 2, {}, TakeMode::RecordOnly);
+	_rigs[_count++] = mk("Turntable", 3, {}, TakeMode::RecordOnly);
 	_rigs[_count++] = mk("Phones", -1, {1}, TakeMode::RecordOnly);
 }
 

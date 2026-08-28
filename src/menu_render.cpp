@@ -555,7 +555,14 @@ void Menu::renderControlMotion(const Rig &r) {
 	const int lvl = m->speedLevel(), mx = m->speedLevelMax();
 	const bool prog = m->programName() != nullptr;
 	const bool fault = m->inFault();
-	const bool running = fault ? false : (m->programRunning() || _mainMotion != MainMotion::Stopped);
+
+	// Device telemetry ("RUNNING"/"HOMING"/...) wins over our locally-tracked
+	// jog state — the turntable/slider can be started from its own buttons.
+	const char *tel = m->motionStateText();
+	bool telMoving = tel && strcmp(tel, "IDLE") && strcmp(tel, "STOPPED") &&
+	                 strcmp(tel, "SLEEP") && strcmp(tel, "ERROR");
+	const bool running =
+	    fault ? false : (m->programRunning() || telMoving || _mainMotion != MainMotion::Stopped);
 
 	uint16_t bar = _takeActive ? theme::kRecordFill
 	               : fault    ? theme::kRecordFill
@@ -568,9 +575,9 @@ void Menu::renderControlMotion(const Rig &r) {
 	if (_takeActive || fault) t.drawRect(0, 0, t.width(), t.height(), bar);
 
 	// Plain state word — no protocol jargon.
-	const char *state = fault              ? "ERROR"
-	                    : m->programRunning() ? "RUNNING"
-	                    : (m->motionStateText() && !strcmp(m->motionStateText(), "HOMING")) ? "HOMING"
+	const char *state = fault                              ? "ERROR"
+	                    : m->programRunning()              ? "RUNNING"
+	                    : (telMoving && strcmp(tel, "MANUAL")) ? tel
 	                    : _mainMotion == MainMotion::Forward  ? "FWD"
 	                    : _mainMotion == MainMotion::Backward ? "BACK"
 	                                                          : "STOPPED";
@@ -842,9 +849,13 @@ void Menu::renderDeviceCard() {
 		snprintf(rc, sizeof(rc), "%d", deviceRegistry.rigMembership(_cardDevice));
 	kv(120, d->kind() == DeviceKind::Camera ? "PHONES" : "IN RIGS", rc);
 
-	const char *acts[] = {"Test link", "Rename"};
-	int16_t y = 138;
-	for (int i = 0; i < 2; i++) y += listItem(y, acts[i], i == _cardCursor) + 4;
+	const bool motion = d->kind() == DeviceKind::Motion;
+	char flip[20];
+	snprintf(flip, sizeof(flip), "Flip L/R: %s", deviceRegistry.invertDir(_cardDevice) ? "ON" : "OFF");
+	const char *acts[3] = {"Test link", "Rename", flip};
+	const int n = motion ? 3 : 2;
+	int16_t y = 130;
+	for (int i = 0; i < n; i++) y += listItem(y, acts[i], i == _cardCursor) + 4;
 	footerLine("UP/DN  OK:DO  <:BACK");
 }
 
@@ -976,8 +987,10 @@ void Menu::renderOtaActive() {
 	t.fillScreen(theme::kBackground);
 	t.drawRect(0, 0, t.width(), t.height(), theme::kWarnFill);
 
+	bool nowifi = ota.state() == Ota::State::NoWifi;
 	text(theme::kCornerSafeInset, kHdrMid, "BLE: OFF", theme::kTextHint);
-	text(t.width() - theme::kCornerSafeInset, kHdrMid, "WIFI: ON", theme::kWarnFill, AlignR);
+	text(t.width() - theme::kCornerSafeInset, kHdrMid, nowifi ? "WIFI: --" : "WIFI: ON",
+	     theme::kWarnFill, AlignR);
 
 	centerText("OTA MODE", 74, theme::kTextPrimary, nullptr, 2);
 
@@ -993,6 +1006,10 @@ void Menu::renderOtaActive() {
 		break;
 	case Ota::State::Failed:
 		centerText("Failed / timeout", 124, theme::kWarnFill, &FreeSans9pt7b);
+		break;
+	case Ota::State::NoWifi:
+		centerText("NO WIFI CONFIGURED", 120, theme::kWarnFill, &FreeSansBold9pt7b);
+		centerText("add src/wifi_env.h and reflash", 144, theme::kTextHint);
 		break;
 	default:
 		break;

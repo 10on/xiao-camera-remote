@@ -11,17 +11,34 @@ DeviceRegistry deviceRegistry;
 namespace {
 const char *kNamespace = "devreg";
 const char *kKeyAlias[] = {"a0", "a1", "a2", "a3"};
+const char *kKeyInvert[] = {"i0", "i1", "i2", "i3"};
 } // namespace
 
 void DeviceRegistry::begin() {
 	Preferences prefs;
 	prefs.begin(kNamespace, /*readOnly=*/false); // RW so a fresh namespace isn't a NOT_FOUND log
 	for (int i = 0; i < deviceCount() && i < DeviceRegistry::kMaxDevices; i++) {
-		if (!prefs.isKey(kKeyAlias[i])) continue; // no alias set -> keep Device::name() fallback
-		String s = prefs.getString(kKeyAlias[i], "");
-		strncpy(_alias[i], s.c_str(), kAliasMax);
-		_alias[i][kAliasMax] = '\0';
+		if (prefs.isKey(kKeyAlias[i])) {
+			String s = prefs.getString(kKeyAlias[i], "");
+			strncpy(_alias[i], s.c_str(), kAliasMax);
+			_alias[i][kAliasMax] = '\0';
+		}
+		_invert[i] = prefs.getBool(kKeyInvert[i], false);
 	}
+	prefs.end();
+}
+
+bool DeviceRegistry::invertDir(int deviceIndex) const {
+	if (deviceIndex < 0 || deviceIndex >= kMaxDevices) return false;
+	return _invert[deviceIndex];
+}
+
+void DeviceRegistry::toggleInvertDir(int deviceIndex) {
+	if (deviceIndex < 0 || deviceIndex >= kMaxDevices) return;
+	_invert[deviceIndex] = !_invert[deviceIndex];
+	Preferences prefs;
+	prefs.begin(kNamespace, false);
+	prefs.putBool(kKeyInvert[deviceIndex], _invert[deviceIndex]);
 	prefs.end();
 }
 

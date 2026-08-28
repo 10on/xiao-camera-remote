@@ -22,13 +22,15 @@ Ota ota;
 static const uint32_t kWifiConnectTimeoutMs = 12000;
 static const uint32_t kUploadWaitTimeoutMs = 60000; // "ждём прошивку в течение минуты"
 
+bool Ota::configured() { return WIFI_CREDENTIALS_COUNT > 0; }
+
 void Ota::begin() {
 	if (_state == State::Connecting || _state == State::WaitingForUpload ||
 	    _state == State::Uploading) {
 		return; // already in progress
 	}
 	if (WIFI_CREDENTIALS_COUNT == 0) {
-		_state = State::Failed;
+		_state = State::NoWifi;
 		return;
 	}
 
@@ -104,6 +106,7 @@ void Ota::update() {
 	switch (_state) {
 	case State::Idle:
 	case State::Failed:
+	case State::NoWifi:
 		return;
 
 	case State::Connecting:

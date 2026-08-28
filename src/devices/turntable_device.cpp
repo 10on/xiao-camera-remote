@@ -30,6 +30,13 @@ const char *TurntableDevice::motionStateText() const {
 	}
 }
 
+// Match on the service UUID (in the primary adv packet) OR the name (which
+// may only be in the scan response) — either alone is enough.
+bool TurntableDevice::matchesAdvertisement(const NimBLEAdvertisedDevice *adv) const {
+	if (adv->haveServiceUUID() && adv->isAdvertisingService(kServiceUUID)) return true;
+	return adv->haveName() && adv->getName() == "Turntable";
+}
+
 void TurntableDevice::activate() { _active = true; }
 
 void TurntableDevice::deactivate() {

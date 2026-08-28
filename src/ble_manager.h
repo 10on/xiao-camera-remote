@@ -23,7 +23,7 @@ private:
 	bool anyDeviceWaiting() const;
 	void ensureScanning();
 
-	static const size_t kMaxDevices = 4;
+	static const size_t kMaxDevices = 6;
 	Device *_devices[kMaxDevices] = {};
 	size_t _deviceCount = 0;
 

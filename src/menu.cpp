@@ -568,11 +568,18 @@ void Menu::handleControlButton(ButtonId id, ButtonEvent ev) {
 		return;
 	}
 
+	// Per-device L/R inversion (Devices card) — 'F'/'B' are motor-relative.
+	const bool inv = deviceRegistry.invertDir(deviceIndexOf(m));
+	const MainMotion fwdM = inv ? MainMotion::Backward : MainMotion::Forward;
+	const MainMotion bwdM = inv ? MainMotion::Forward : MainMotion::Backward;
+	const Command fwdC = inv ? Command::MoveBackward : Command::MoveForward;
+	const Command bwdC = inv ? Command::MoveForward : Command::MoveBackward;
+
 	switch (id) {
 	case ButtonId::Up:    speed(true); break;
 	case ButtonId::Down:  speed(false); break;
-	case ButtonId::Left:  drive(MainMotion::Backward, Command::MoveBackward); break;
-	case ButtonId::Right: drive(MainMotion::Forward, Command::MoveForward); break;
+	case ButtonId::Left:  drive(bwdM, bwdC); break;
+	case ButtonId::Right: drive(fwdM, fwdC); break;
 	default: break;
 	}
 }
@@ -633,7 +640,9 @@ void Menu::handleDevicesButton(ButtonId id, ButtonEvent ev) {
 
 void Menu::handleDeviceCardButton(ButtonId id, ButtonEvent ev) {
 	Device *d = deviceAt(_cardDevice);
-	const int acts = 2; // 0 test link, 1 rename
+	// 0 test link, 1 rename, [2 flip L/R] for motion devices.
+	const bool canFlip = d && d->kind() == DeviceKind::Motion;
+	const int acts = canFlip ? 3 : 2;
 
 	if (ev == ButtonEvent::Press) {
 		switch (id) {
@@ -646,8 +655,10 @@ void Menu::handleDeviceCardButton(ButtonId id, ButtonEvent ev) {
 		case ButtonId::Ok:
 			if (_cardCursor == 0) {
 				if (d) d->isActive() ? d->deactivate() : d->activate();
-			} else {
+			} else if (_cardCursor == 1) {
 				openTextEntry(TextReturn::DeviceRename, deviceRegistry.alias(_cardDevice));
+			} else {
+				deviceRegistry.toggleInvertDir(_cardDevice);
 			}
 			break;
 		default:

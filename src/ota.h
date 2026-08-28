@@ -14,7 +14,10 @@ class WebServer;
 // Settings, and gives up after OTA_WAIT_MS with nothing uploaded.
 class Ota {
 public:
-	enum class State { Idle, Connecting, WaitingForUpload, Uploading, Failed };
+	enum class State { Idle, Connecting, WaitingForUpload, Uploading, Failed, NoWifi };
+
+	// Whether any WiFi credentials are compiled in (wifi_env.h present).
+	static bool configured();
 
 	void begin();  // enter OTA mode: connect WiFi, start server
 	void cancel(); // leave OTA mode, WiFi off

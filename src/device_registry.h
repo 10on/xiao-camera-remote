@@ -21,6 +21,12 @@ public:
 	SeenState seen(int deviceIndex) const;
 	int rigMembership(int deviceIndex) const;       // # of stored rigs referencing it
 
+	// Per-device L/R inversion: 'F'/'B' in a motion protocol are motor-
+	// relative, so which way "→" drives depends on how the device is placed.
+	// Persisted; the Menu swaps MoveForward/MoveBackward when set.
+	bool invertDir(int deviceIndex) const;
+	void toggleInvertDir(int deviceIndex);
+
 	static const int kAliasMax = 18;
 	static const int kMaxDevices = 4; // keep >= device_table.cpp kDevices[] count
 
@@ -28,6 +34,7 @@ private:
 	char _alias[kMaxDevices][kAliasMax + 1] = {{0}, {0}, {0}, {0}}; // one per kDevices entry
 	SeenState _seen[kMaxDevices] = {SeenState::NeverThisBoot, SeenState::NeverThisBoot,
 	                                SeenState::NeverThisBoot, SeenState::NeverThisBoot};
+	bool _invert[kMaxDevices] = {false, false, false, false};
 };
 
 extern DeviceRegistry deviceRegistry;

@@ -1,5 +1,13 @@
 #include "ble_manager.h"
 
+#include <Arduino.h>
+
+// Set -DBLE_SCAN_DEBUG=1 in platformio.ini build_flags to log every
+// advertisement seen and every driver match over serial.
+#ifndef BLE_SCAN_DEBUG
+#define BLE_SCAN_DEBUG 0
+#endif
+
 BleManager bleManager;
 
 void BleManager::begin() {
@@ -55,10 +63,20 @@ void BleManager::update() {
 void BleManager::onResult(const NimBLEAdvertisedDevice *advertisedDevice) {
 	if (_pendingConnectDevice) return; // already have one queued for this tick
 
+#if BLE_SCAN_DEBUG
+	Serial.printf("[scan] %s  name='%s'  svc=%d\n",
+	              advertisedDevice->getAddress().toString().c_str(),
+	              advertisedDevice->haveName() ? advertisedDevice->getName().c_str() : "?",
+	              advertisedDevice->haveServiceUUID() ? 1 : 0);
+#endif
+
 	for (size_t i = 0; i < _deviceCount; i++) {
 		Device *dev = _devices[i];
 		if (dev->usesCentralConnection() && dev->isActive() && !dev->isConnected() &&
 		    dev->matchesAdvertisement(advertisedDevice)) {
+#if BLE_SCAN_DEBUG
+			Serial.printf("[scan] -> match %s\n", dev->name());
+#endif
 			// Stop scanning now (cheap, doesn't touch GAP connection
 			// state) but defer the actual connect() to update() — see
 			// ble_manager.h's comment on _pendingConnectDevice.
