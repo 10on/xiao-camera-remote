@@ -29,6 +29,8 @@ constexpr uint16_t kSliderFill = 0x04A9; // #00944a
 constexpr uint16_t kSliderText = 0x00C1; // #04180d
 constexpr uint16_t kDollyFill  = 0xA27A; // #a04ed6
 constexpr uint16_t kDollyText  = 0xFFBF; // #fdf5ff
+constexpr uint16_t kTurntableFill = 0x0530; // #00a583 teal, clear of the state hues
+constexpr uint16_t kTurntableText = 0xEFFF; // #ecffff
 
 // --- State (hue = what's happening) ---
 constexpr uint16_t kOkFill      = 0x05AB; // #00b45b

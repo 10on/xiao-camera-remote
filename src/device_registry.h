@@ -22,11 +22,12 @@ public:
 	int rigMembership(int deviceIndex) const;       // # of stored rigs referencing it
 
 	static const int kAliasMax = 18;
+	static const int kMaxDevices = 4; // keep >= device_table.cpp kDevices[] count
 
 private:
-	char _alias[3][kAliasMax + 1] = {{0}, {0}, {0}}; // one per kDevices entry
-	SeenState _seen[3] = {SeenState::NeverThisBoot, SeenState::NeverThisBoot,
-	                      SeenState::NeverThisBoot};
+	char _alias[kMaxDevices][kAliasMax + 1] = {{0}, {0}, {0}, {0}}; // one per kDevices entry
+	SeenState _seen[kMaxDevices] = {SeenState::NeverThisBoot, SeenState::NeverThisBoot,
+	                                SeenState::NeverThisBoot, SeenState::NeverThisBoot};
 };
 
 extern DeviceRegistry deviceRegistry;
