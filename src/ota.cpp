@@ -59,6 +59,10 @@ void Ota::stopServer() {
 void Ota::startServer() {
 	_http = new WebServer(80);
 
+	// Needed so the upload handler can read the total size for a progress bar.
+	static const char *kHeaders[] = {"Content-Length"};
+	_http->collectHeaders(kHeaders, 1);
+
 	_http->on("/", HTTP_GET, [this]() {
 		_http->send(200, "text/plain", "XIAO Remote OTA. POST firmware to /update.\n");
 	});
@@ -89,11 +93,25 @@ void Ota::startServer() {
 			HTTPUpload &up = _http->upload();
 			if (up.status == UPLOAD_FILE_START) {
 				_state = State::Uploading;
-				Update.begin(UPDATE_SIZE_UNKNOWN);
+				_uploadDone = 0;
+				_uploadPct = 0;
+				// Content-Length includes the small multipart wrapper, so the
+				// bar tops out a hair under 100 % — clamped below.
+				_uploadTotal = (size_t)_http->header("Content-Length").toInt();
+				Update.begin(_uploadTotal ? _uploadTotal : UPDATE_SIZE_UNKNOWN);
 			} else if (up.status == UPLOAD_FILE_WRITE) {
 				Update.write(up.buf, up.currentSize);
+				_uploadDone += up.currentSize;
+				uint8_t pct = _uploadTotal ? (uint8_t)min<size_t>(100, _uploadDone * 100 / _uploadTotal)
+				                           : 0;
+				if (pct != _uploadPct) {
+					_uploadPct = pct;
+					if (_progressFn) _progressFn(pct); // paint the bar mid-transfer
+				}
 			} else if (up.status == UPLOAD_FILE_END) {
 				Update.end(true);
+				_uploadPct = 100;
+				if (_progressFn) _progressFn(100);
 			}
 		});
 

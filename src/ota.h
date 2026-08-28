@@ -25,6 +25,13 @@ public:
 
 	State state() const { return _state; }
 	const char *ip() const { return _ip.c_str(); }
+	uint8_t uploadPct() const { return _uploadPct; } // 0..100 while Uploading
+
+	// The multipart upload is handled synchronously inside handleClient(), so
+	// the main loop can't redraw during it — this fires per progress step so
+	// the caller can paint a bar from inside the transfer.
+	using ProgressFn = void (*)(uint8_t pct);
+	void setProgressCallback(ProgressFn fn) { _progressFn = fn; }
 
 private:
 	void startServer();
@@ -34,6 +41,11 @@ private:
 	String _ip;
 	uint32_t _stateEnteredMs = 0;
 	WebServer *_http = nullptr;
+
+	size_t _uploadTotal = 0;
+	size_t _uploadDone = 0;
+	uint8_t _uploadPct = 0;
+	ProgressFn _progressFn = nullptr;
 };
 
 extern Ota ota;

@@ -127,6 +127,10 @@ void setup() {
 	NimBLEDevice::init("XIAO-Remote");
 	bleManager.begin();
 
+	// The OTA upload is handled synchronously inside WebServer::handleClient(),
+	// so let it paint the progress bar itself from inside the transfer.
+	ota.setProgressCallback([](uint8_t) { menu.renderOtaProgress(); });
+
 	menu.begin();
 	menu.render();
 

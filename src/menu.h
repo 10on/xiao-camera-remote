@@ -25,6 +25,7 @@ public:
 	void renderDynamic();
 	void updateStatusLed();
 	bool takeActive() const { return _takeActive; } // suppresses stage-2 deep sleep
+	void renderOtaProgress(); // repaint the OTA screen from inside a blocking upload
 
 private:
 	enum class Screen {

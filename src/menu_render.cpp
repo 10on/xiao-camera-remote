@@ -999,11 +999,19 @@ void Menu::renderOtaActive() {
 		centerText("Connecting WiFi...", 120, theme::kTextSecondary, &FreeSans9pt7b);
 		break;
 	case Ota::State::WaitingForUpload:
-	case Ota::State::Uploading:
 		centerText(ota.ip(), 128, theme::kWarnFill, &FreeMonoBold18pt7b);
-		centerText(ota.state() == Ota::State::Uploading ? "Uploading..." : "Waiting for upload...",
-		           156, theme::kTextSecondary, &FreeSans9pt7b);
+		centerText("Waiting for upload...", 156, theme::kTextSecondary, &FreeSans9pt7b);
 		break;
+	case Ota::State::Uploading: {
+		char p[8];
+		snprintf(p, sizeof(p), "%d%%", ota.uploadPct());
+		centerText(p, 116, theme::kTextPrimary, &FreeMonoBold24pt7b);
+		int16_t bx = theme::kPadH + 20, bw = t.width() - 2 * bx, by = 150;
+		t.drawRoundRect(bx, by, bw, 12, 4, theme::kBorder);
+		t.fillRoundRect(bx + 2, by + 2, (bw - 4) * ota.uploadPct() / 100, 8, 3, theme::kWarnFill);
+		centerText("Uploading firmware...", 178, theme::kTextSecondary, &FreeSans9pt7b);
+		break;
+	}
 	case Ota::State::Failed:
 		centerText("Failed / timeout", 124, theme::kWarnFill, &FreeSans9pt7b);
 		break;
@@ -1017,9 +1025,11 @@ void Menu::renderOtaActive() {
 
 	t.fillRoundRect(theme::kPadH, t.height() - 40, t.width() - 2 * theme::kPadH, 18, 6,
 	                theme::kWarnFill);
-	t.setFont(nullptr);
-	t.setTextColor(theme::kWarnText);
-	t.setCursor(theme::kPadH + 6, t.height() - 35);
-	t.print("OTHER FUNCTIONS DISABLED");
+	text(theme::kPadH + 6, t.height() - 31, "OTHER FUNCTIONS DISABLED", theme::kWarnText);
 	footerLine("OK - EXIT");
+}
+
+void Menu::renderOtaProgress() {
+	renderOtaActive();
+	display.flush();
 }
