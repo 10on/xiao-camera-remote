@@ -5,7 +5,7 @@
 // User-editable list of shooting rigs, persisted to NVS as one blob.
 // Seeds a default set on first boot (mirrors ux-redesign.md §5). The rig
 // editor (Menu) mutates a working copy and calls save() to commit.
-static const int kMaxRigs = 8;
+static const int kMaxRigs = 10;
 
 class RigStore {
 public:

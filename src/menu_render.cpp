@@ -209,6 +209,7 @@ void Menu::render() {
 		case Screen::Settings:     renderSettings(); break;
 		case Screen::Devices:      renderDevices(); break;
 		case Screen::DeviceCard:   renderDeviceCard(); break;
+		case Screen::Service:      renderService(); break;
 		case Screen::Scan:         renderScan(); break;
 		case Screen::ControlPrefs: renderControlPrefs(); break;
 		case Screen::ScreenPrefs:  renderScreenPrefs(); break;
@@ -235,6 +236,7 @@ void Menu::renderDynamic() {
 	case Screen::Scan:
 	case Screen::Devices:
 	case Screen::DeviceCard:
+	case Screen::Service:
 		render();
 		return;
 	default:
@@ -361,8 +363,16 @@ void Menu::renderEditor() {
 		for (int i = 0; i < deviceCount(); i++)
 			if (deviceAt(i)->kind() == DeviceKind::Motion) motion[rows++] = i;
 
+		// 3-row window around the cursor: motion devices + "None" overflow the panel.
+		const int items = rows + 1;
+		int first = _editCursor - 1;
+		if (first > items - 3) first = items - 3;
+		if (first < 0) first = 0;
+		const int visible = items < 3 ? items : 3;
+
 		int16_t y = 56;
-		for (int k = 0; k <= rows; k++) {
+		for (int slot = 0; slot < visible; slot++) {
+			const int k = first + slot;
 			const char *label = k < rows ? deviceAt(motion[k])->name() : "None";
 			y += listItem(y, label, k == _editCursor) + 7;
 		}
@@ -795,8 +805,16 @@ void Menu::renderDevices() {
 	snprintf(cnt, sizeof(cnt), "%d", deviceCount());
 	chrome("DEVICES", cnt, theme::kPhoneFill, false);
 
+	// 3-row window around the cursor, same as the rig list: 5 devices don't fit.
+	const int n = deviceCount();
+	int first = _devicesCursor - 1;
+	if (first > n - 3) first = n - 3;
+	if (first < 0) first = 0;
+	const int visible = n < 3 ? n : 3;
+
 	int16_t y = 34;
-	for (int i = 0; i < deviceCount(); i++) {
+	for (int slot = 0; slot < visible; slot++) {
+		const int i = first + slot;
 		Device *d = deviceAt(i);
 		bool sel = i == _devicesCursor;
 		if (sel)
@@ -851,10 +869,47 @@ void Menu::renderDeviceCard() {
 	const bool motion = d->kind() == DeviceKind::Motion;
 	char flip[20];
 	snprintf(flip, sizeof(flip), "Flip L/R: %s", deviceRegistry.invertDir(_cardDevice) ? "ON" : "OFF");
-	const char *acts[3] = {"Test link", "Rename", flip};
-	const int n = motion ? 3 : 2;
+	const char *acts[4] = {"Test link", "Rename", motion ? flip : "Service", "Service"};
+	const int n = (motion ? 3 : 2) + (d->serviceActionCount() > 0 ? 1 : 0);
+	// 3-row window around the cursor once Service makes it 4 rows
+	int first = _cardCursor - 1;
+	if (first > n - 3) first = n - 3;
+	if (first < 0) first = 0;
 	int16_t y = 130;
-	for (int i = 0; i < n; i++) y += listItem(y, acts[i], i == _cardCursor) + 4;
+	for (int i = first; i < n && i < first + 3; i++) y += listItem(y, acts[i], i == _cardCursor) + 4;
+	footerLine("UP/DN  OK:DO  <:BACK");
+}
+
+// ===========================================================================
+// Device service (not in the mock): info rows + maintenance actions
+// ===========================================================================
+
+void Menu::renderService() {
+	Adafruit_GFX &t = C();
+	t.fillScreen(theme::kBackground);
+	Device *d = deviceAt(_cardDevice);
+	if (!d) { _screen = Screen::Devices; return; }
+
+	chrome(deviceRegistry.alias(_cardDevice), d->isConnected() ? "LINKED" : "CONNECTING",
+	       d->isConnected() ? theme::kOkFill : theme::kWarnFill);
+
+	int16_t y = 38;
+	const char *key;
+	char val[24];
+	for (int i = 0; d->serviceInfo(i, key, val, sizeof(val)); i++, y += 17) {
+		text(theme::kPadH, y, key, theme::kTextHint);
+		text(t.width() - theme::kPadH, y, val, theme::kTextInactive, AlignR);
+	}
+	t.drawFastHLine(theme::kPadH, y - 6, t.width() - 2 * theme::kPadH, theme::kDivider);
+
+	const int n = d->serviceActionCount();
+	int first = _svcCursor - 1;
+	if (first > n - 3) first = n - 3;
+	if (first < 0) first = 0;
+	y += 2;
+	for (int i = first; i < n && i < first + 3; i++)
+		y += listItem(y, d->serviceActionLabel(i), i == _svcCursor,
+		              d->isConnected() ? theme::kTextInactive : theme::kTextHint) + 4;
 	footerLine("UP/DN  OK:DO  <:BACK");
 }
 

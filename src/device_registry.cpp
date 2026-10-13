@@ -10,8 +10,8 @@ DeviceRegistry deviceRegistry;
 
 namespace {
 const char *kNamespace = "devreg";
-const char *kKeyAlias[] = {"a0", "a1", "a2", "a3"};
-const char *kKeyInvert[] = {"i0", "i1", "i2", "i3"};
+const char *kKeyAlias[] = {"a0", "a1", "a2", "a3", "a4"};
+const char *kKeyInvert[] = {"i0", "i1", "i2", "i3", "i4"};
 } // namespace
 
 void DeviceRegistry::begin() {

@@ -111,6 +111,18 @@ public:
 	// y — several active devices can be visible on screen at once.
 	virtual void renderStatusLine(Adafruit_GFX &tft, int16_t y) = 0;
 
+	// Service screen (Settings -> Devices -> card -> Service): device-specific
+	// maintenance actions and read-only info. Devices without one keep the
+	// defaults and the card hides the entry.
+	virtual int serviceActionCount() const { return 0; }
+	virtual const char *serviceActionLabel(int i) const { (void)i; return ""; }
+	virtual void runServiceAction(int i) { (void)i; }
+	// Info row i as key + formatted value; false past the last row.
+	virtual bool serviceInfo(int i, const char *&key, char *val, size_t valLen) const {
+		(void)i; (void)key; (void)val; (void)valLen;
+		return false;
+	}
+
 	// --- Used by BleManager only ---
 	// Most drivers are BLE-central clients discovered by scanning. Local
 	// peripheral drivers (for example the phone HID driver) override this so

@@ -28,13 +28,14 @@ public:
 	void toggleInvertDir(int deviceIndex);
 
 	static const int kAliasMax = 18;
-	static const int kMaxDevices = 4; // keep >= device_table.cpp kDevices[] count
+	static const int kMaxDevices = 5; // keep >= device_table.cpp kDevices[] count
 
 private:
-	char _alias[kMaxDevices][kAliasMax + 1] = {{0}, {0}, {0}, {0}}; // one per kDevices entry
+	char _alias[kMaxDevices][kAliasMax + 1] = {{0}, {0}, {0}, {0}, {0}}; // one per kDevices entry
 	SeenState _seen[kMaxDevices] = {SeenState::NeverThisBoot, SeenState::NeverThisBoot,
-	                                SeenState::NeverThisBoot, SeenState::NeverThisBoot};
-	bool _invert[kMaxDevices] = {false, false, false, false};
+	                                SeenState::NeverThisBoot, SeenState::NeverThisBoot,
+	                                SeenState::NeverThisBoot};
+	bool _invert[kMaxDevices] = {false, false, false, false, false};
 };
 
 extern DeviceRegistry deviceRegistry;

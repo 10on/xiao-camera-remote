@@ -11,7 +11,7 @@
 //  Daily path:  Rigs (1) -> Connecting (2/3) -> Control (4-9) ; a lost Main
 //               outside a take draws MainLost (10) over Control.
 //  Editing:     Rigs -> RigMenu (18) -> Editor (11-13) / TextEntry (19).
-//  Settings:    Settings (14) -> Devices (15) -> DeviceCard (21) / Scan (20)
+//  Settings:    Settings (14) -> Devices (15) -> DeviceCard (21) -> Service / Scan (20)
 //                              -> ControlPrefs (22) / ScreenPrefs / System (23)
 //
 // Emergency stop (long-Ok) and the mid-take auto-E-Stop on Main loss are
@@ -30,7 +30,7 @@ public:
 private:
 	enum class Screen {
 		Rigs, RigMenu, Editor, TextEntry, Connecting, Control,
-		Settings, Devices, DeviceCard, Scan, ControlPrefs, ScreenPrefs, System,
+		Settings, Devices, DeviceCard, Service, Scan, ControlPrefs, ScreenPrefs, System,
 	};
 	enum class MainMotion { Stopped, Forward, Backward };
 	enum class TextReturn { EditorName, RigRename, DeviceRename };
@@ -49,6 +49,7 @@ private:
 	void renderSettings();
 	void renderDevices();
 	void renderDeviceCard();
+	void renderService();
 	void renderScan();
 	void renderControlPrefs();
 	void renderScreenPrefs();
@@ -65,6 +66,7 @@ private:
 	void handleSettingsButton(ButtonId id, ButtonEvent ev);
 	void handleDevicesButton(ButtonId id, ButtonEvent ev);
 	void handleDeviceCardButton(ButtonId id, ButtonEvent ev);
+	void handleServiceButton(ButtonId id, ButtonEvent ev);
 	void handleScanButton(ButtonId id, ButtonEvent ev);
 	void handleControlPrefsButton(ButtonId id, ButtonEvent ev);
 	void handleScreenPrefsButton(ButtonId id, ButtonEvent ev);
@@ -118,6 +120,7 @@ private:
 	int _devicesCursor = 0;
 	int _cardDevice = 0;
 	int _cardCursor = 0;
+	int _svcCursor = 0;
 	int _ctrlPrefCursor = 0;
 	int _pendingBrightness = 0;
 	int _sysCursor = 0;

@@ -15,22 +15,24 @@ const char *kKeyCount = "count";
 const uint32_t kLayoutVersion = 0x52494703; // 'R','I','G',3 — reseed with turntable rigs
 } // namespace
 
-// Device indices into menu.cpp kDevices: sliderDevice=0, phoneDevice=1, dollyDevice=2.
-void RigStore::seedDefaults() {
-	auto mk = [](const char *name, int8_t main, std::initializer_list<int8_t> sec,
-	             TakeMode tm) -> Rig {
-		Rig r{};
-		strncpy(r.name, name, kRigNameMax);
-		r.name[kRigNameMax] = '\0';
-		r.mainIndex = main;
-		r.secondaryCount = 0;
-		for (int8_t s : sec) {
-			if (r.secondaryCount < kMaxSecondaryPerRig) r.secondary[r.secondaryCount++] = s;
-		}
-		r.takeMode = tm;
-		return r;
-	};
+static Rig mk(const char *name, int8_t main, std::initializer_list<int8_t> sec, TakeMode tm) {
+	Rig r{};
+	strncpy(r.name, name, kRigNameMax);
+	r.name[kRigNameMax] = '\0';
+	r.mainIndex = main;
+	r.secondaryCount = 0;
+	for (int8_t s : sec) {
+		if (r.secondaryCount < kMaxSecondaryPerRig) r.secondary[r.secondaryCount++] = s;
+	}
+	r.takeMode = tm;
+	return r;
+}
 
+// Device indices into device_table.cpp kDevices: slider=0, phone=1, dolly=2,
+// turntable (SM)=3, mid table=4.
+static const int8_t kMidTableIndex = 4;
+
+void RigStore::seedDefaults() {
 	// Slider rigs default to RecordAndMoveMain: with the program API the
 	// slider owns a safe, explicit trajectory (Ping-Pong), so "OK = REC +
 	// run the shot" is the natural, clearly-labelled default. Dolly keeps
@@ -38,10 +40,12 @@ void RigStore::seedDefaults() {
 	_count = 0;
 	_rigs[_count++] = mk("Slider + Phone", 0, {1}, TakeMode::RecordAndMoveMain);
 	_rigs[_count++] = mk("Dolly + Phone", 2, {1}, TakeMode::RecordOnly);
-	_rigs[_count++] = mk("Turntable + Phone", 3, {1}, TakeMode::RecordAndMoveMain);
+	_rigs[_count++] = mk("Table SM + Phone", 3, {1}, TakeMode::RecordAndMoveMain);
+	_rigs[_count++] = mk("Table MID + Phone", kMidTableIndex, {1}, TakeMode::RecordAndMoveMain);
 	_rigs[_count++] = mk("Slider", 0, {}, TakeMode::RecordAndMoveMain);
 	_rigs[_count++] = mk("Dolly", 2, {}, TakeMode::RecordOnly);
-	_rigs[_count++] = mk("Turntable", 3, {}, TakeMode::RecordOnly);
+	_rigs[_count++] = mk("Table SM", 3, {}, TakeMode::RecordOnly);
+	_rigs[_count++] = mk("Table MID", kMidTableIndex, {}, TakeMode::RecordOnly);
 	_rigs[_count++] = mk("Phones", -1, {1}, TakeMode::RecordOnly);
 }
 
@@ -65,7 +69,16 @@ void RigStore::begin() {
 	if (!ok) {
 		seedDefaults();
 		save();
+		return;
 	}
+
+	// The mid table was added after rigs were already stored: append its
+	// rigs once instead of bumping kLayoutVersion and wiping user rigs.
+	for (int i = 0; i < _count; i++)
+		if (_rigs[i].references(kMidTableIndex)) return;
+	if (_count < kMaxRigs) _rigs[_count++] = mk("Table MID + Phone", kMidTableIndex, {1}, TakeMode::RecordAndMoveMain);
+	if (_count < kMaxRigs) _rigs[_count++] = mk("Table MID", kMidTableIndex, {}, TakeMode::RecordOnly);
+	save();
 }
 
 void RigStore::save() const {

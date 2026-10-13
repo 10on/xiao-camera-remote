@@ -31,6 +31,8 @@ constexpr uint16_t kDollyFill  = 0xA27A; // #a04ed6
 constexpr uint16_t kDollyText  = 0xFFBF; // #fdf5ff
 constexpr uint16_t kTurntableFill = 0x0530; // #00a583 teal, clear of the state hues
 constexpr uint16_t kTurntableText = 0xEFFF; // #ecffff
+constexpr uint16_t kMidTableFill = 0xC211; // #c2408a magenta, not in the design handoff
+constexpr uint16_t kMidTableText = 0xFF9F; // #fff2f8
 
 // --- State (hue = what's happening) ---
 constexpr uint16_t kOkFill      = 0x05AB; // #00b45b

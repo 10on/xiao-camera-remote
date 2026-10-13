@@ -287,6 +287,7 @@ void Menu::handleButton(ButtonId id, ButtonEvent ev) {
 	case Screen::Settings:     handleSettingsButton(id, ev); break;
 	case Screen::Devices:      handleDevicesButton(id, ev); break;
 	case Screen::DeviceCard:   handleDeviceCardButton(id, ev); break;
+	case Screen::Service:      handleServiceButton(id, ev); break;
 	case Screen::Scan:         handleScanButton(id, ev); break;
 	case Screen::ControlPrefs: handleControlPrefsButton(id, ev); break;
 	case Screen::ScreenPrefs:  handleScreenPrefsButton(id, ev); break;
@@ -640,9 +641,11 @@ void Menu::handleDevicesButton(ButtonId id, ButtonEvent ev) {
 
 void Menu::handleDeviceCardButton(ButtonId id, ButtonEvent ev) {
 	Device *d = deviceAt(_cardDevice);
-	// 0 test link, 1 rename, [2 flip L/R] for motion devices.
+	// 0 test link, 1 rename, [2 flip L/R] for motion devices, [last: Service].
 	const bool canFlip = d && d->kind() == DeviceKind::Motion;
-	const int acts = canFlip ? 3 : 2;
+	const bool hasService = d && d->serviceActionCount() > 0;
+	const int serviceRow = canFlip ? 3 : 2;
+	const int acts = serviceRow + (hasService ? 1 : 0);
 
 	if (ev == ButtonEvent::Press) {
 		switch (id) {
@@ -657,6 +660,11 @@ void Menu::handleDeviceCardButton(ButtonId id, ButtonEvent ev) {
 				if (d) d->isActive() ? d->deactivate() : d->activate();
 			} else if (_cardCursor == 1) {
 				openTextEntry(TextReturn::DeviceRename, deviceRegistry.alias(_cardDevice));
+			} else if (hasService && _cardCursor == serviceRow) {
+				// Service actions need the link: bring it up, leave it to the card's Back
+				if (!d->isActive()) d->activate();
+				_svcCursor = 0;
+				_screen = Screen::Service;
 			} else {
 				deviceRegistry.toggleInvertDir(_cardDevice);
 			}
@@ -667,6 +675,26 @@ void Menu::handleDeviceCardButton(ButtonId id, ButtonEvent ev) {
 	} else if (ev == ButtonEvent::LongPress && id == ButtonId::Left) {
 		if (d && d->isActive()) d->deactivate();
 		_screen = Screen::Devices;
+	}
+}
+
+// --- Device service ---------------------------------------------
+
+void Menu::handleServiceButton(ButtonId id, ButtonEvent ev) {
+	Device *d = deviceAt(_cardDevice);
+	const int n = d ? d->serviceActionCount() : 0;
+	if (n == 0) { _screen = Screen::DeviceCard; return; }
+
+	if (ev == ButtonEvent::Press) {
+		switch (id) {
+		case ButtonId::Up:   _svcCursor = (_svcCursor + n - 1) % n; break;
+		case ButtonId::Down: _svcCursor = (_svcCursor + 1) % n; break;
+		case ButtonId::Left: _screen = Screen::DeviceCard; break;
+		case ButtonId::Ok:   d->runServiceAction(_svcCursor); break;
+		default: break;
+		}
+	} else if (ev == ButtonEvent::LongPress && id == ButtonId::Left) {
+		_screen = Screen::DeviceCard;
 	}
 }
 
