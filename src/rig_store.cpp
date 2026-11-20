@@ -31,6 +31,7 @@ static Rig mk(const char *name, int8_t main, std::initializer_list<int8_t> sec, 
 // Device indices into device_table.cpp kDevices: slider=0, phone=1, dolly=2,
 // turntable (SM)=3, mid table=4.
 static const int8_t kMidTableIndex = 4;
+static const int8_t kPhone2Index = 5; // device_table.cpp
 
 void RigStore::seedDefaults() {
 	// Slider rigs default to RecordAndMoveMain: with the program API the
@@ -72,13 +73,25 @@ void RigStore::begin() {
 		return;
 	}
 
-	// The mid table was added after rigs were already stored: append its
-	// rigs once instead of bumping kLayoutVersion and wiping user rigs.
-	for (int i = 0; i < _count; i++)
-		if (_rigs[i].references(kMidTableIndex)) return;
-	if (_count < kMaxRigs) _rigs[_count++] = mk("Table MID + Phone", kMidTableIndex, {1}, TakeMode::RecordAndMoveMain);
-	if (_count < kMaxRigs) _rigs[_count++] = mk("Table MID", kMidTableIndex, {}, TakeMode::RecordOnly);
-	save();
+	// Devices added after rigs were already stored: append their rigs once
+	// instead of bumping kLayoutVersion and wiping user rigs.
+	auto referenced = [&](int dev) {
+		for (int i = 0; i < _count; i++)
+			if (_rigs[i].references(dev)) return true;
+		return false;
+	};
+	bool changed = false;
+	if (!referenced(kMidTableIndex)) {
+		if (_count < kMaxRigs) _rigs[_count++] = mk("Table MID + Phone", kMidTableIndex, {1}, TakeMode::RecordAndMoveMain);
+		if (_count < kMaxRigs) _rigs[_count++] = mk("Table MID", kMidTableIndex, {}, TakeMode::RecordOnly);
+		changed = true;
+	}
+	// Phones became individual devices: a cameras-only rig for "Phone 2".
+	if (!referenced(kPhone2Index) && _count < kMaxRigs) {
+		_rigs[_count++] = mk("Phone 2", -1, {kPhone2Index}, TakeMode::RecordOnly);
+		changed = true;
+	}
+	if (changed) save();
 }
 
 void RigStore::save() const {

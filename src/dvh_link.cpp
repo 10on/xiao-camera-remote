@@ -55,7 +55,7 @@ void DvhLink::onSubscribe(NimBLECharacteristic *chr, NimBLEConnInfo &connInfo, u
 	Serial.printf("[dvh] subscribe conn %u = %u\n", h, subValue);
 	if (subValue & 1) {
 		_mac = h;
-		phoneDevice.onPeerDisconnected(h); // in case it was ever counted as a phone
+		PhoneHub::onMacSubscribed(connInfo); // never a phone, even if bonded
 		_helloAtMs = millis() + kHelloDelayMs;
 		_helloPending = true;
 	} else if (_mac == h) {

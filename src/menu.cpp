@@ -66,7 +66,6 @@ void Menu::endSession() {
 void Menu::startTake() {
 	_takeActive = true;
 	_recordStartedAtMs = millis();
-	phoneDevice.markTakeStart();
 	fanToPhones(_activeRig, Command::Record);
 	dvhLink.take();
 	const Rig *r = rigAt(_activeRig);
@@ -86,7 +85,6 @@ void Menu::startTake() {
 void Menu::stopTake() {
 	_takeActive = false;
 	_recordStartedAtMs = 0;
-	phoneDevice.markTakeEnd();
 	fanToPhones(_activeRig, Command::StopRecord);
 	dvhLink.stop();
 	const Rig *r = rigAt(_activeRig);
@@ -247,7 +245,6 @@ bool Menu::update() {
 		_takeActive = false;
 		_recordStartedAtMs = 0;
 		_mainMotion = MainMotion::Stopped;
-		phoneDevice.markTakeEnd();
 		needRender = true;
 	}
 	// Main lost: whatever take was running (phones or a phone-less program
@@ -515,7 +512,6 @@ void Menu::handleControlButton(ButtonId id, ButtonEvent ev) {
 			_takeActive = false;
 			_recordStartedAtMs = 0;
 			_mainMotion = MainMotion::Stopped;
-			phoneDevice.markTakeEnd();
 			fanToMain(_activeRig, Command::EmergencyStop);
 			fanToPhones(_activeRig, Command::StopRecord);
 			dvhLink.stop();

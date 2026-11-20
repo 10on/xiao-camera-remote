@@ -19,7 +19,7 @@ void BleServer::begin() {
 	_server->setCallbacks(this, false);
 	_server->advertiseOnDisconnect(false); // tick() decides
 
-	phoneDevice.setupHid(_server);
+	PhoneHub::setupHid(_server);
 	dvhLink.setup(_server);
 
 	NimBLEDevice::getScan()->stop(); // belt and braces — see #557 above
@@ -39,9 +39,26 @@ void BleServer::begin() {
 void BleServer::tick() {
 	if (!_server) return;
 	NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
-	bool want = phoneDevice.wantsAdvertising() || dvhLink.wantsAdvertising();
-	if (want && !adv->isAdvertising()) adv->start();
-	else if (!want && adv->isAdvertising()) adv->stop();
+	bool want = PhoneHub::wantsAdvertising() || dvhLink.wantsAdvertising();
+	if (want && !adv->isAdvertising()) {
+		bool ok = adv->start();
+		static uint32_t lastFailLogMs = 0;
+		if (!ok && millis() - lastFailLogMs > 5000) {
+			lastFailLogMs = millis();
+			Serial.printf("[adv] start FAILED (%u peers)\n", (unsigned)_server->getConnectedCount());
+		}
+	} else if (!want && adv->isAdvertising()) {
+		adv->stop();
+	}
+
+	// State log on change (diagnostics: "phone can't see the remote").
+	static int lastSig = -1;
+	int sig = (want ? 1 : 0) | (adv->isAdvertising() ? 2 : 0) | (_server->getConnectedCount() << 2);
+	if (sig != lastSig) {
+		lastSig = sig;
+		Serial.printf("[adv] want=%d on=%d peers=%u mac=%d\n", want, adv->isAdvertising(),
+		              (unsigned)_server->getConnectedCount(), dvhLink.macConnected());
+	}
 }
 
 void BleServer::onConnect(NimBLEServer *server, NimBLEConnInfo &connInfo) {
@@ -52,12 +69,11 @@ void BleServer::onConnect(NimBLEServer *server, NimBLEConnInfo &connInfo) {
 
 void BleServer::onDisconnect(NimBLEServer *, NimBLEConnInfo &connInfo, int) {
 	uint16_t h = connInfo.getConnHandle();
-	phoneDevice.onPeerDisconnected(h);
+	PhoneHub::onPeerDisconnected(h);
 	dvhLink.onPeerDisconnected(h);
 }
 
 void BleServer::onAuthenticationComplete(NimBLEConnInfo &connInfo) {
 	if (!connInfo.isSlave() || !connInfo.isEncrypted()) return; // ours as peripheral only
-	if (dvhLink.isMac(connInfo.getConnHandle())) return;
-	phoneDevice.onPhoneReady(connInfo.getConnHandle());
+	PhoneHub::onEncrypted(connInfo);
 }

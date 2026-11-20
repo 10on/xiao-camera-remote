@@ -4,33 +4,36 @@
 #include <NimBLEHIDDevice.h>
 #include "device.h"
 
-// BLE HID peripheral presented to phones as a camera/headset remote. This
-// side of the dual-role link is a GATT server: phones connect to *us* and
-// receive Consumer Control reports. The server itself is shared with DVH
-// Link and owned by BleServer (ble_server.h); a peer counts as a phone once
-// its link is encrypted (HID requires it — the Mac's DVH Link never is).
+// Phones as individual devices. Each PhoneDevice is a slot ("Phone 1".."Phone
+// 4") bound to one bonded phone by its BLE identity address, persisted in
+// NVS. A rig picks slots like any other device, so a configuration can use
+// just the 13 mini over the table and leave the 16 Pro on the slider alone.
 //
-// Multi-phone: the one PhoneDevice slot holds several bonded phones at once
-// (up to kMaxPhones). A shutter notify fans out to every subscribed phone
-// in a single call, so REC / STOP REC hit them all. HID-over-GATT to
-// multiple hosts at once is not a well-trodden path — validate on the
-// bench that both an iPhone and an Android hold the link and keep
-// triggering.
+// All slots share one HID service on the remote's GATT server (BleServer):
+// phones connect to *us*. A peer counts as a phone once its link is
+// encrypted (HID requires it). Then PhoneHub binds it to its slot — a new
+// phone takes the first free slot, preferring one the current rig wants —
+// and keeps the link only if that slot is active; otherwise it disconnects,
+// so a phone outside the configuration never records.
+//
+// The Mac (DVH Link) may be bonded too (macOS pairs it as a HID keyboard):
+// an unknown encrypted peer is decided only after kDecideDelayMs, giving the
+// Mac time to subscribe to DVH Link, and the Mac's identity is remembered.
 class PhoneDevice : public Device {
 public:
-	static const int kMaxPhones = 3;
+	explicit PhoneDevice(int slot) : _slot(slot) {}
 
-	const char *name() const override { return "Phone"; }
+	const char *name() const override;
 	const char *advertisedName() const override { return ""; }
 	DeviceKind kind() const override { return DeviceKind::Camera; }
-	const char *abbrev() const override { return "PH"; } // "ТЛ" in the design
+	const char *abbrev() const override { return "PH"; }
 	uint16_t identityColor565() const override;
 	uint16_t identityTextColor565() const override;
 	void drawGlyph(Adafruit_GFX &g, int16_t x, int16_t y, int16_t size, uint16_t color) const override;
 
 	bool isActive() const override { return _active; }
-	bool isConnected() const override { return _peerCount > 0; }
-	void activate() override;
+	bool isConnected() const override;
+	void activate() override { _active = true; }
 	void deactivate() override;
 
 	void tick() override;
@@ -40,41 +43,50 @@ public:
 	bool usesCentralConnection() const override { return false; }
 	void beginGattConnection(const NimBLEAdvertisedDevice *) override {}
 
-	int cameraReady() const override { return _peerCount; }
-	int cameraTotal() const override;
+	int cameraReady() const override { return isConnected() ? 1 : 0; }
+	int cameraTotal() const override { return _active ? 1 : 0; }
 
-	// Live count of connected phones and stored bonds (for the UI).
-	int connectedCount() const { return _peerCount; }
-	int bondedPhoneCount() const { return NimBLEDevice::getNumBonds(); }
+	// Device card -> Service: forget the phone bound to this slot.
+	int serviceActionCount() const override { return 1; }
+	const char *serviceActionLabel(int) const override { return "Forget phone"; }
+	void runServiceAction(int) override;
+	bool serviceInfo(int i, const char *&key, char *val, size_t valLen) const override;
 
-	// The Menu tells us when a take starts/stops so cameraTotal() can hold
-	// the peak count (a phone dropping mid-take then reads as "1/2").
-	void markTakeStart();
-	void markTakeEnd();
-
-	// --- BleServer hooks ---
-	void setupHid(NimBLEServer *server); // once, before the server starts
-	bool wantsAdvertising() const { return _active && _peerCount < kMaxPhones; }
-	void onPhoneReady(uint16_t connHandle);       // link encrypted
-	void onPeerDisconnected(uint16_t connHandle); // also: peer turned out to be the Mac
+	int slot() const { return _slot; }
 
 private:
-	void sendShutterClick();
-	void notifyPhones(uint16_t usage);
-
-	NimBLEServer *_server = nullptr;
-	NimBLEHIDDevice *_hid = nullptr;
-	NimBLECharacteristic *_consumerInput = nullptr;
+	int _slot;
 	bool _active = false;
 	bool _releasePending = false;
 	uint32_t _pressedAtMs = 0;
-	uint32_t _lastBatteryUpdateMs = 0;
-
-	uint16_t _peers[kMaxPhones] = {0}; // connection handles of connected phones
-	int _peerCount = 0;
-
-	bool _takeActive = false;
-	int _takePeak = 0;
 };
 
-extern PhoneDevice phoneDevice;
+namespace PhoneHub {
+static const int kSlots = 4;
+static const uint32_t kDecideDelayMs = 3000;
+
+PhoneDevice *at(int slot);
+
+void begin();                        // load slot bindings from NVS
+void setupHid(NimBLEServer *server); // once, before the server starts
+void tick();                         // each loop: decide pending peers, battery level
+bool wantsAdvertising();             // an active slot is waiting for its phone
+
+// BleServer / DvhLink hooks (NimBLE host task).
+void onEncrypted(const NimBLEConnInfo &connInfo);
+void onPeerDisconnected(uint16_t connHandle);
+void onMacSubscribed(const NimBLEConnInfo &connInfo); // this peer is the Mac, not a phone
+
+// PhoneDevice internals.
+bool connected(int slot);
+bool bound(int slot);
+void dropSlot(int slot);   // disconnect the slot's phone (if connected)
+void forgetSlot(int slot); // unbind + delete its bond
+void notify(int slot, uint16_t usage);
+bool addressOf(int slot, NimBLEAddress &out);
+} // namespace PhoneHub
+
+extern PhoneDevice phoneDevice;  // slot 0 — device index 1, "Phone 1"
+extern PhoneDevice phoneDevice2; // slot 1
+extern PhoneDevice phoneDevice3; // slot 2
+extern PhoneDevice phoneDevice4; // slot 3

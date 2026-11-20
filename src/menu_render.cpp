@@ -403,7 +403,6 @@ void Menu::renderEditor() {
 			     sel ? theme::kTextPrimary : theme::kTextInactive, AlignL, &FreeSans9pt7b);
 			y += 32 + 6;
 		}
-		footerLine("MULTIPLE PHONES OK", theme::kTextHint, 200);
 		footerLine(">:TOGGLE  OK:NEXT");
 	} else { // step 3
 		text(theme::kPadH, 34, "Take mode", theme::kTextPrimary, AlignL, &FreeSansBold9pt7b);
@@ -683,7 +682,6 @@ void Menu::renderControlCamerasOnly(const Rig &r) {
 	int ready, total;
 	rigPhoneCounts(_activeRig, ready, total);
 	const int16_t PAD = theme::kPadH, W = t.width() - 2 * PAD;
-	const int conn = phoneDevice.connectedCount();
 
 	char cam[12];
 	snprintf(cam, sizeof(cam), "CAM %d/%d", ready, total);
@@ -691,16 +689,17 @@ void Menu::renderControlCamerasOnly(const Rig &r) {
 	              ready >= total && ready > 0 ? theme::kOkFill : theme::kWarnFill);
 	if (_takeActive) t.drawRect(0, 0, t.width(), t.height(), theme::kRecordFill);
 
-	// One row per connected phone + one "waiting" row if the slot expects more.
+	// One row per phone in the rig (by its alias), at most 3.
 	int16_t y = 36;
-	int rows = conn > 0 ? conn : 1;
-	if (rows > 3) rows = 3;
-	for (int k = 0; k < rows; k++) {
-		bool up = k < conn;
-		char nm[12];
-		snprintf(nm, sizeof(nm), up ? "Phone %d" : "Phone", k + 1);
+	int shown = 0;
+	for (int k = 0; k < r.secondaryCount && shown < 3; k++) {
+		Device *d = deviceAt(r.secondary[k]);
+		if (!d || d->kind() != DeviceKind::Camera) continue;
+		shown++;
+		bool up = d->isConnected();
+		const char *nm = deviceRegistry.alias(r.secondary[k]);
 		t.drawRoundRect(PAD, y, W, 34, 11, theme::kBorder);
-		deviceRow(y, deviceAt(1), nm, up ? "READY" : "LINKING",
+		deviceRow(y, d, nm, up ? "READY" : "LINKING",
 		          up ? theme::kOkFill : theme::kWarnFill, up ? theme::kOkText : theme::kWarnText, 34,
 		          &FreeSans9pt7b);
 		y += 40;
@@ -732,7 +731,7 @@ void Menu::renderControlCamerasOnly(const Rig &r) {
 		text(tx, bcy, "OK - REC", ready > 0 ? theme::kTextPrimary : theme::kTextInactive, AlignL,
 		     &FreeSansBold12pt7b);
 
-		footerLine(conn > 1 ? "START GOES TO ALL PHONES" : "WAITING FOR A PHONE TO CONNECT",
+		footerLine(ready < total ? "WAITING FOR A PHONE TO CONNECT" : ready > 1 ? "START GOES TO ALL PHONES" : "",
 		           theme::kTextSecondary, 192);
 		footerLine("HOLD <:CONFIGS");
 	}
@@ -859,12 +858,8 @@ void Menu::renderDeviceCard() {
 	kv(86, "ID", d->advertisedName()[0] ? d->advertisedName() : "-");
 	kv(103, "LAST SEEN", seenText(deviceRegistry.seen(_cardDevice)));
 	char rc[24];
-	if (d->kind() == DeviceKind::Camera)
-		snprintf(rc, sizeof(rc), "%d bond / %d up", phoneDevice.bondedPhoneCount(),
-		         phoneDevice.connectedCount());
-	else
-		snprintf(rc, sizeof(rc), "%d", deviceRegistry.rigMembership(_cardDevice));
-	kv(120, d->kind() == DeviceKind::Camera ? "PHONES" : "IN RIGS", rc);
+	snprintf(rc, sizeof(rc), "%d", deviceRegistry.rigMembership(_cardDevice));
+	kv(120, "IN RIGS", rc);
 
 	const bool motion = d->kind() == DeviceKind::Motion;
 	char flip[20];

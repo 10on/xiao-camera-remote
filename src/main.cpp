@@ -11,6 +11,7 @@
 #include "ble_manager.h"
 #include "ble_server.h"
 #include "dvh_link.h"
+#include "devices/phone_device.h"
 #include "ota.h"
 #include "led.h"
 #include "buzzer.h"
@@ -117,6 +118,7 @@ void setup() {
 	settings.begin(); // must run before display.begin(), which reads settings.brightness()
 	rigStore.begin();
 	deviceRegistry.begin();
+	PhoneHub::begin(); // phone slot bindings — before BLE
 
 	pcf8575.begin(PCF8575_ADDRESS, PIN_I2C_SDA, PIN_I2C_SCL, PIN_PCF_INT);
 

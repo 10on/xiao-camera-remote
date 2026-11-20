@@ -13,6 +13,9 @@ static Device *const kDevices[] = {
 	&dollyDevice,     // 2
 	&turntableDevice, // 3
 	&midTableDevice,  // 4
+	&phoneDevice2,    // 5
+	&phoneDevice3,    // 6
+	&phoneDevice4,    // 7
 };
 static const int kCount = sizeof(kDevices) / sizeof(kDevices[0]);
 
