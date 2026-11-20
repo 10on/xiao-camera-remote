@@ -9,6 +9,7 @@
 #include "device_registry.h"
 #include "devices/phone_device.h"
 #include "display.h"
+#include "dvh_link.h"
 #include "ota.h"
 #include "led.h"
 #include "battery.h"
@@ -42,6 +43,7 @@ void Menu::launchRig(int rigIndex) {
 	_mainMotion = MainMotion::Stopped;
 	_lostSinceMs = 0;
 	_screen = Screen::Connecting;
+	dvhLink.setSessionActive(true);
 }
 
 void Menu::endSession() {
@@ -49,6 +51,8 @@ void Menu::endSession() {
 		fanToPhones(_activeRig, Command::StopRecord);
 		fanToMain(_activeRig, Command::EmergencyStop);
 	}
+	dvhLink.stop();
+	dvhLink.setSessionActive(false);
 	for (int i = 0; i < deviceCount(); i++)
 		if (deviceAt(i)->isActive()) deviceAt(i)->deactivate();
 
@@ -66,6 +70,7 @@ void Menu::startTake() {
 	_recordStartedAtMs = millis();
 	phoneDevice.markTakeStart();
 	fanToPhones(_activeRig, Command::Record);
+	dvhLink.take();
 	const Rig *r = rigAt(_activeRig);
 	Device *m = rigMainOf(_activeRig);
 	if (r && r->takeMode == TakeMode::RecordAndMoveMain && m) {
@@ -85,6 +90,7 @@ void Menu::stopTake() {
 	_recordStartedAtMs = 0;
 	phoneDevice.markTakeEnd();
 	fanToPhones(_activeRig, Command::StopRecord);
+	dvhLink.stop();
 	const Rig *r = rigAt(_activeRig);
 	Device *m = rigMainOf(_activeRig);
 	if (r && r->takeMode == TakeMode::RecordAndMoveMain && m) {
@@ -246,6 +252,9 @@ bool Menu::update() {
 		phoneDevice.markTakeEnd();
 		needRender = true;
 	}
+	// Main lost: whatever take was running (phones or a phone-less program
+	// take for the Mac) is over.
+	if (m && _mainEverReady && !mainNow) dvhLink.stop();
 
 	bool lost = mainLostTakeoverActive();
 	if (lost != _shownMainLost) needRender = true;
@@ -511,6 +520,7 @@ void Menu::handleControlButton(ButtonId id, ButtonEvent ev) {
 			phoneDevice.markTakeEnd();
 			fanToMain(_activeRig, Command::EmergencyStop);
 			fanToPhones(_activeRig, Command::StopRecord);
+			dvhLink.stop();
 			return;
 		}
 		if (id == ButtonId::Left) { endSession(); return; }
@@ -528,9 +538,15 @@ void Menu::handleControlButton(ButtonId id, ButtonEvent ev) {
 		else if (ready > 0) startTake();
 		else if (m && m->programName()) {
 			// Phone-less program device: Ok is the program's START / STOP.
-			if (m->programRunning()) m->handleCommand(Command::StopProgram);
-			else if (!m->inFault() && m->canExecuteCommand(Command::StartProgram))
+			// For the Mac (DVH Link) it's a take too — e.g. an action camera
+			// on the slider recording on its own.
+			if (m->programRunning()) {
+				m->handleCommand(Command::StopProgram);
+				dvhLink.stop();
+			} else if (!m->inFault() && m->canExecuteCommand(Command::StartProgram)) {
 				m->handleCommand(Command::StartProgram);
+				dvhLink.take();
+			}
 		} else if (m) { // phone-less plain motion device: Ok is a plain STOP
 			m->handleCommand(Command::StopMove);
 			_mainMotion = MainMotion::Stopped;

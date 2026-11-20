@@ -6,7 +6,9 @@
 
 // BLE HID peripheral presented to phones as a camera/headset remote. This
 // side of the dual-role link is a GATT server: phones connect to *us* and
-// receive Consumer Control reports.
+// receive Consumer Control reports. The server itself is shared with DVH
+// Link and owned by BleServer (ble_server.h); a peer counts as a phone once
+// its link is encrypted (HID requires it — the Mac's DVH Link never is).
 //
 // Multi-phone: the one PhoneDevice slot holds several bonded phones at once
 // (up to kMaxPhones). A shutter notify fans out to every subscribed phone
@@ -14,7 +16,7 @@
 // multiple hosts at once is not a well-trodden path — validate on the
 // bench that both an iPhone and an Android hold the link and keep
 // triggering.
-class PhoneDevice : public Device, public NimBLEServerCallbacks {
+class PhoneDevice : public Device {
 public:
 	static const int kMaxPhones = 3;
 
@@ -50,13 +52,13 @@ public:
 	void markTakeStart();
 	void markTakeEnd();
 
-	// NimBLEServerCallbacks
-	void onConnect(NimBLEServer *server, NimBLEConnInfo &connInfo) override;
-	void onDisconnect(NimBLEServer *server, NimBLEConnInfo &connInfo, int reason) override;
+	// --- BleServer hooks ---
+	void setupHid(NimBLEServer *server); // once, before the server starts
+	bool wantsAdvertising() const { return _active && _peerCount < kMaxPhones; }
+	void onPhoneReady(uint16_t connHandle);       // link encrypted
+	void onPeerDisconnected(uint16_t connHandle); // also: peer turned out to be the Mac
 
 private:
-	void ensureInitialized();
-	void updateAdvertising(); // advertise while there's room for another phone
 	void sendShutterClick();
 
 	NimBLEServer *_server = nullptr;

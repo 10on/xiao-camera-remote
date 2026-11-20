@@ -50,6 +50,9 @@ src/
   battery.h/.cpp          pack voltage/percent via ADC divider
   ble_manager.h/.cpp      owns the single shared BLE scan, (re)connects
                           every active device, keeps them independent
+  ble_server.h/.cpp       owns the one GATT server (HID for phones + DVH
+                          Link for the Mac) and the shared advertising
+  dvh_link.h/.cpp         DVH Link service: tells the Mac about takes
   ota.h/.cpp              WiFi OTA update, entered from Settings
   led.h/.cpp              single WS2812 status pixel
   buzzer.h/.cpp           passive piezo, non-blocking beep()
@@ -79,6 +82,35 @@ does that centrally (NimBLE only supports one scan at a time) and calls
 `Device::activate()/deactivate()` just flip a want-connection flag; the
 manager keeps retrying for active-but-disconnected devices and stops
 scanning once everything active is connected.
+
+## Mac / DVH Link
+
+Optional link to the Mac running `dvh` (davinchi-helper — shot plan, take
+registry, audio slate). Protocol: `davinchi-helper/docs/remote-ble.md`.
+The remote only **reports** takes; nothing on the remote waits on the Mac
+or shows Mac state — without a Mac everything works as before.
+
+- Same GATT server as the phone HID (`ble_server.cpp`), service
+  `d7b10001-6e0d-4c1e-8f3a-5d1a7e000000`, no encryption — the Mac doesn't
+  pair. Characteristics: **Event** `…0002` (NOTIFY) and **Display** `…0003`
+  (WRITE; accepted and ignored for now).
+- Event words: `hello` when the Mac subscribes; `take` / `stop` on a take.
+  A take is REC/STOP REC to the phones; in a configuration without phones,
+  Ok's program START/STOP counts as a take too (e.g. an action camera on
+  the slider). E-Stop, Main lost mid-take and leaving the configuration
+  also send `stop` (only if a take was running).
+- Discoverable for the Mac while any configuration is running and the Mac
+  isn't connected; the service UUID is in the primary advertising packet,
+  the name moved to the scan response. Once connected the Mac stays
+  connected across configurations.
+- Mac vs phone: a peer becomes a phone only once its link is encrypted
+  (HID requires it); the peer subscribed to Event is the Mac and never
+  counts in "Phone: N ready".
+- Side effect: while the remote is discoverable for the Mac, a phone
+  bonded earlier may reconnect even in a configuration without phones. It
+  is held but gets no shutter clicks.
+- `CONFIG_BT_NIMBLE_MAX_CONNECTIONS=8`: slider, dolly, 2 turntables,
+  2 phones, Mac, one spare.
 
 ## UI flow
 - **Device list** (default screen): Up/Down select a device, **Ok**

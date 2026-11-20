@@ -9,6 +9,8 @@
 #include "buttons.h"
 #include "battery.h"
 #include "ble_manager.h"
+#include "ble_server.h"
+#include "dvh_link.h"
 #include "ota.h"
 #include "led.h"
 #include "buzzer.h"
@@ -125,6 +127,7 @@ void setup() {
 	buzzer.begin();
 
 	NimBLEDevice::init("XIAO-Remote");
+	bleServer.begin(); // GATT server (HID + DVH Link) — must precede any scan
 	bleManager.begin();
 
 	// The OTA upload is handled synchronously inside WebServer::handleClient(),
@@ -146,6 +149,8 @@ void loop() {
 	buttons.update();
 	battery.update();
 	bleManager.update();
+	bleServer.tick();
+	dvhLink.tick();
 	ota.update();
 	buzzer.update();
 	statusLed.update();

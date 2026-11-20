@@ -43,66 +43,27 @@ void PhoneDevice::drawGlyph(Adafruit_GFX &g, int16_t x, int16_t y, int16_t s, ui
 	g.fillRect(ix + iw / 2 - 1, iy + 3, 3, 1, c);          // speaker
 }
 
-void PhoneDevice::ensureInitialized() {
-	if (_server) return;
-
-	// HID report characteristics require an encrypted link. No-input/output
-	// pairing gives the phone a standard "pair" confirmation and keeps the
-	// bond in NimBLE storage for automatic reconnection after reboot.
-	NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
-	NimBLEDevice::setSecurityAuth(true, false, true);
-
-	_server = NimBLEDevice::createServer();
-	_server->setCallbacks(this, false);
-	_server->advertiseOnDisconnect(false);
-
-	_hid = new NimBLEHIDDevice(_server);
+void PhoneDevice::setupHid(NimBLEServer *server) {
+	_server = server;
+	_hid = new NimBLEHIDDevice(server);
 	_hid->setManufacturer("XIAO Remote");
 	_hid->setPnp(0x02, 0x303A, 0x4001, 0x0100); // USB-IF source, Espressif VID
 	_hid->setHidInfo(0x00, 0x02);                // normally-connectable HID
 	_hid->setReportMap(kConsumerReportMap, sizeof(kConsumerReportMap));
 	_consumerInput = _hid->getInputReport(kReportId);
 	_hid->setBatteryLevel(battery.percent());
-
-	// Starting a GATT server while a central-role scan is active crashes
-	// NimBLE (assert failed: ble_svc_gap_init — resetGATT() inside
-	// NimBLEServer::start() collides with the in-progress scan; see
-	// h2zero/NimBLE-Arduino#557). Stop it first — BleManager restarts it
-	// next tick if anything's still waiting.
-	NimBLEDevice::getScan()->stop();
-	_server->start();
-
-	NimBLEAdvertising *advertising = NimBLEDevice::getAdvertising();
-	advertising->setName("XIAO Camera Remote");
-	advertising->setAppearance(HID_KEYBOARD);
-	advertising->addServiceUUID(NimBLEUUID(static_cast<uint16_t>(0x1812)));
-	advertising->enableScanResponse(true);
 }
 
-// Advertise whenever we're active and have room for another phone; stop
-// once full so we're not discoverable for no reason.
-void PhoneDevice::updateAdvertising() {
-	if (!_server) return;
-	NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
-	bool want = _active && _peerCount < kMaxPhones;
-	if (want && !adv->isAdvertising()) adv->start();
-	else if (!want && adv->isAdvertising()) adv->stop();
-}
-
-void PhoneDevice::activate() {
-	_active = true;
-	ensureInitialized();
-	updateAdvertising();
-}
+// Advertising itself is BleServer::tick()'s job (wantsAdvertising()).
+void PhoneDevice::activate() { _active = true; }
 
 void PhoneDevice::deactivate() {
 	_active = false;
 	_releasePending = false;
 	_takeActive = false;
-	if (_server) {
-		NimBLEDevice::getAdvertising()->stop();
-		for (uint16_t h : _server->getPeerDevices()) _server->disconnect(h);
-	}
+	// Drop the phones only — a connected Mac (DVH Link) stays.
+	if (_server)
+		for (int i = 0; i < _peerCount; i++) _server->disconnect(_peers[i]);
 	_peerCount = 0;
 }
 
@@ -118,34 +79,27 @@ void PhoneDevice::markTakeStart() {
 
 void PhoneDevice::markTakeEnd() { _takeActive = false; }
 
-void PhoneDevice::onConnect(NimBLEServer *server, NimBLEConnInfo &connInfo) {
-	uint16_t h = connInfo.getConnHandle();
-	// Full already (shouldn't happen — we stop advertising) or a duplicate.
+void PhoneDevice::onPhoneReady(uint16_t h) {
 	for (int i = 0; i < _peerCount; i++)
-		if (_peers[i] == h) return;
+		if (_peers[i] == h) return; // re-encryption of a known link
 	if (_peerCount >= kMaxPhones) {
-		server->disconnect(h);
+		if (_server) _server->disconnect(h);
 		return;
 	}
 	_peers[_peerCount++] = h;
-	server->updateConnParams(h, 12, 24, 0, 200);
-	updateAdvertising();
 }
 
-void PhoneDevice::onDisconnect(NimBLEServer *, NimBLEConnInfo &connInfo, int) {
-	uint16_t h = connInfo.getConnHandle();
+void PhoneDevice::onPeerDisconnected(uint16_t h) {
 	for (int i = 0; i < _peerCount; i++) {
 		if (_peers[i] != h) continue;
 		for (int j = i; j < _peerCount - 1; j++) _peers[j] = _peers[j + 1];
 		_peerCount--;
+		_releasePending = false;
 		break;
 	}
-	_releasePending = false;
-	updateAdvertising();
 }
 
 void PhoneDevice::tick() {
-	if (_active) updateAdvertising();
 	if (!_hid) return;
 
 	uint32_t now = millis();
