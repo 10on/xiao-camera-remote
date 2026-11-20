@@ -87,6 +87,7 @@ void PhoneDevice::onPhoneReady(uint16_t h) {
 		return;
 	}
 	_peers[_peerCount++] = h;
+	Serial.printf("[phone] ready conn %u (%d phones)\n", h, _peerCount);
 }
 
 void PhoneDevice::onPeerDisconnected(uint16_t h) {
@@ -105,7 +106,7 @@ void PhoneDevice::tick() {
 	uint32_t now = millis();
 	if (_releasePending && now - _pressedAtMs >= 12) {
 		uint16_t released = 0;
-		_consumerInput->notify(reinterpret_cast<uint8_t *>(&released), sizeof(released));
+		notifyPhones(released);
 		_releasePending = false;
 	}
 	if (now - _lastBatteryUpdateMs >= 30000) {
@@ -114,14 +115,22 @@ void PhoneDevice::tick() {
 	}
 }
 
+// Only to the phones' own handles — never notify() to every subscriber: a
+// Mac that once paired with the remote attaches its own HID host to the
+// same link as DVH Link, and Volume Increment would change its volume.
+void PhoneDevice::notifyPhones(uint16_t usage) {
+	if (!_consumerInput) return;
+	for (int i = 0; i < _peerCount; i++)
+		_consumerInput->notify(reinterpret_cast<uint8_t *>(&usage), sizeof(usage), _peers[i]);
+}
+
 void PhoneDevice::sendShutterClick() {
 	if (_peerCount == 0 || !_consumerInput) return;
 
-	// A HID key is an edge, not a persistent state. notify() with no handle
-	// fans the report to every subscribed phone at once. The release is
-	// sent from tick() after a short hold so the stack can't coalesce them.
+	// A HID key is an edge, not a persistent state. The release is sent
+	// from tick() after a short hold so the stack can't coalesce them.
 	uint16_t usage = kConsumerVolumeIncrement;
-	_consumerInput->notify(reinterpret_cast<uint8_t *>(&usage), sizeof(usage));
+	notifyPhones(usage);
 	_pressedAtMs = millis();
 	_releasePending = true;
 }

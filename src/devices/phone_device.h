@@ -60,6 +60,7 @@ public:
 
 private:
 	void sendShutterClick();
+	void notifyPhones(uint16_t usage);
 
 	NimBLEServer *_server = nullptr;
 	NimBLEHIDDevice *_hid = nullptr;

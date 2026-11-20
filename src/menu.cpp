@@ -43,7 +43,6 @@ void Menu::launchRig(int rigIndex) {
 	_mainMotion = MainMotion::Stopped;
 	_lostSinceMs = 0;
 	_screen = Screen::Connecting;
-	dvhLink.setSessionActive(true);
 }
 
 void Menu::endSession() {
@@ -52,7 +51,6 @@ void Menu::endSession() {
 		fanToMain(_activeRig, Command::EmergencyStop);
 	}
 	dvhLink.stop();
-	dvhLink.setSessionActive(false);
 	for (int i = 0; i < deviceCount(); i++)
 		if (deviceAt(i)->isActive()) deviceAt(i)->deactivate();
 

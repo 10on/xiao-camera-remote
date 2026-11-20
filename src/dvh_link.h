@@ -21,11 +21,19 @@ public:
 	void setup(NimBLEServer *server); // from BleServer::begin(), before start()
 	void tick();                      // sends a queued "hello"
 
-	// The remote is discoverable for the Mac while a configuration is
-	// running and the Mac isn't connected yet. Once connected it stays
-	// connected across configurations.
-	void setSessionActive(bool on) { _session = on; }
-	bool wantsAdvertising() const { return _session && _mac == kNone; }
+	// hello goes out this long after the Event subscription: a Mac bonded
+	// with the remote (macOS pairs it as a HID keyboard) gets its CCCD
+	// restored on reconnect, before the app itself subscribes — an
+	// immediate hello would be dropped, and the app's own subscribe raises
+	// no new event because the CCCD value doesn't change.
+	static const uint32_t kHelloDelayMs = 1500;
+
+	// The remote is discoverable for the Mac whenever the Mac isn't
+	// connected — from boot, so it's linked before the first take (a take
+	// right after launching a configuration would otherwise be lost while
+	// the Mac is still connecting). Side effect: bonded phones may
+	// reconnect outside a phone configuration too; they get no clicks.
+	bool wantsAdvertising() const { return _mac == kNone; }
 
 	bool macConnected() const { return _mac != kNone; }
 	bool isMac(uint16_t connHandle) const { return _mac != kNone && _mac == connHandle; }
@@ -51,7 +59,7 @@ private:
 	NimBLECharacteristic *_display = nullptr;
 	volatile uint16_t _mac = kNone; // set from the NimBLE host task
 	volatile bool _helloPending = false;
-	bool _session = false;
+	volatile uint32_t _helloAtMs = 0;
 	bool _inTake = false;
 };
 

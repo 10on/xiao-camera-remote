@@ -99,16 +99,23 @@ or shows Mac state — without a Mac everything works as before.
   Ok's program START/STOP counts as a take too (e.g. an action camera on
   the slider). E-Stop, Main lost mid-take and leaving the configuration
   also send `stop` (only if a take was running).
-- Discoverable for the Mac while any configuration is running and the Mac
-  isn't connected; the service UUID is in the primary advertising packet,
-  the name moved to the scan response. Once connected the Mac stays
-  connected across configurations.
+- Discoverable for the Mac whenever the Mac isn't connected, from boot —
+  so it is linked before the first take. The service UUID is in the
+  primary advertising packet, the name moved to the scan response.
+- `hello` goes out 1.5 s after the Event subscription: a Mac that paired
+  with the remote (macOS treats it as a HID keyboard) gets its subscription
+  restored on reconnect before the app subscribes, so an immediate `hello`
+  would be lost.
+- HID shutter reports go to each phone's connection only, never to every
+  subscriber — otherwise a paired Mac gets Volume Up and its volume moves.
+- Serial log: `[dvh] take -> conn N: ok`, `[dvh] take: no Mac`, subscribe /
+  disconnect lines — handy when checking the link.
 - Mac vs phone: a peer becomes a phone only once its link is encrypted
   (HID requires it); the peer subscribed to Event is the Mac and never
   counts in "Phone: N ready".
 - Side effect: while the remote is discoverable for the Mac, a phone
-  bonded earlier may reconnect even in a configuration without phones. It
-  is held but gets no shutter clicks.
+  bonded earlier may reconnect outside a phone configuration. It is held
+  but gets no shutter clicks.
 - `CONFIG_BT_NIMBLE_MAX_CONNECTIONS=8`: slider, dolly, 2 turntables,
   2 phones, Mac, one spare.
 
