@@ -73,7 +73,7 @@ PhoneDevice *at(int slot);
 void begin();                        // load slot bindings from NVS
 void setupHid(NimBLEServer *server); // once, before the server starts
 void tick();                         // each loop: decide pending peers, battery level
-bool wantsAdvertising();             // an active slot is waiting for its phone
+bool wantsAdvertising();             // a slot of the running rig is waiting for its phone
 
 // BleServer / DvhLink hooks (NimBLE host task).
 void onEncrypted(const NimBLEConnInfo &connInfo);

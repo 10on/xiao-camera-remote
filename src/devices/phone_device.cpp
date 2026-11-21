@@ -157,6 +157,13 @@ void PhoneHub::begin() {
 
 void PhoneHub::setupHid(NimBLEServer *server) {
 	g_server = server;
+	// The Mac links through its own advertising set without pairing (see
+	// BleServer). Drop its old keyboard bond so macOS can't resume the HID
+	// link on the phone set.
+	if (g_macKnown && NimBLEDevice::isBonded(NimBLEAddress(g_mac))) {
+		bool ok = NimBLEDevice::deleteBond(NimBLEAddress(g_mac));
+		Serial.printf("[phone] Mac bond %s deleted: %d\n", NimBLEAddress(g_mac).toString().c_str(), ok);
+	}
 	g_hid = new NimBLEHIDDevice(server);
 	g_hid->setManufacturer("XIAO Remote");
 	g_hid->setPnp(0x02, 0x303A, 0x4001, 0x0100); // USB-IF source, Espressif VID
@@ -203,7 +210,11 @@ void PhoneHub::tick() {
 // rig slot still waiting for its first phone.
 bool PhoneHub::wantsAdvertising() {
 	for (int i = 0; i < kSlots; i++)
-		if ((bound(i) || kDevices[i]->isActive()) && !connected(i)) return true;
+		// Only the rig's slots: advertising for a bound phone that is away
+		// (16 Pro not on the set) kept the single radio busy and the Mac's
+		// 2 s supervision timeout ran out. Phones outside the rig link up
+		// while we advertise for the Mac or once their slot is in a rig.
+		if (kDevices[i]->isActive() && !connected(i)) return true;
 	return false;
 }
 

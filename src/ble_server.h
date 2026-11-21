@@ -13,8 +13,9 @@
 // the in-progress scan; see h2zero/NimBLE-Arduino#557). Services can't be
 // added after start() without the same resetGATT(), so both are set up here.
 //
-// Advertising is shared too: the remote advertises while either the phone
-// driver wants another phone or DVH Link wants the Mac (tick()).
+// Two advertising sets (tick()): the phone set (public address, HID) while
+// a rig's phone is missing, the Mac set (random address, DVH Link only, no
+// pairing) while the Mac is not linked.
 class BleServer : public NimBLEServerCallbacks {
 public:
 	void begin(); // once, from setup(), after NimBLEDevice::init()
@@ -25,8 +26,14 @@ public:
 	void onConnect(NimBLEServer *server, NimBLEConnInfo &connInfo) override;
 	void onDisconnect(NimBLEServer *server, NimBLEConnInfo &connInfo, int reason) override;
 	void onAuthenticationComplete(NimBLEConnInfo &connInfo) override;
+	void onConnParamsUpdate(NimBLEConnInfo &connInfo) override;
+
+	static NimBLEAddress macAddress(); // the Mac set's random static address
+	static bool viaMacSet(uint16_t connHandle);
 
 private:
+	static const uint8_t kPhoneInst = 0;
+	static const uint8_t kMacInst = 1;
 	NimBLEServer *_server = nullptr;
 };
 

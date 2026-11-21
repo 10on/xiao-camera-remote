@@ -94,9 +94,13 @@ void DollyDevice::beginGattConnection(const NimBLEAdvertisedDevice *adv) {
 	_nextInitAtMs = millis() + 100;
 }
 
-void DollyDevice::onConnect(NimBLEClient *) { _connected = true; }
+void DollyDevice::onConnect(NimBLEClient *) {
+	_connected = true;
+	Serial.println("[dolly] connect");
+}
 
-void DollyDevice::onDisconnect(NimBLEClient *, int) {
+void DollyDevice::onDisconnect(NimBLEClient *, int reason) {
+	Serial.printf("[dolly] disconnect reason 0x%x\n", reason);
 	_connected = false;
 	_initializing = false;
 	_nextInitSpeed = 0;
