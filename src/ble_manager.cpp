@@ -14,8 +14,12 @@ void BleManager::begin() {
 	NimBLEScan *scan = NimBLEDevice::getScan();
 	scan->setScanCallbacks(this, false);
 	scan->setActiveScan(true);
+	// One radio serves the scan *and* every live link (Mac, phones, motion
+	// devices). A 100% duty scan starved those links into supervision
+	// timeouts (Mac: "connection timed out" every few seconds); 30% still
+	// finds a device within a second or two.
 	scan->setInterval(100);
-	scan->setWindow(100);
+	scan->setWindow(30);
 }
 
 void BleManager::registerDevice(Device *dev) {

@@ -121,15 +121,12 @@ uint16_t decide(const Pending &p) {
 		g_dirty = true;
 		Serial.printf("[phone] new phone -> %s\n", kNames[s]);
 	}
-	if (!kDevices[s]->isActive()) {
-		Serial.printf("[phone] %s conn %u: not in this rig, dropped\n", kNames[s], p.conn);
-		return p.conn;
-	}
 	if (g_slots[s].conn != kNone && g_slots[s].conn != p.conn) {
 		Serial.printf("[phone] %s conn %u: replaces conn %u\n", kNames[s], p.conn, g_slots[s].conn);
 	}
 	g_slots[s].conn = p.conn;
-	Serial.printf("[phone] %s ready conn %u\n", kNames[s], p.conn);
+	Serial.printf("[phone] %s ready conn %u%s\n", kNames[s], p.conn,
+	              kDevices[s]->isActive() ? "" : " (not in this rig)");
 	return kNone;
 }
 
@@ -201,9 +198,12 @@ void PhoneHub::tick() {
 	}
 }
 
+// Every bonded phone stays linked, in the rig or not (iOS stops
+// reconnecting on its own after the remote drops it a few times); plus a
+// rig slot still waiting for its first phone.
 bool PhoneHub::wantsAdvertising() {
 	for (int i = 0; i < kSlots; i++)
-		if (kDevices[i]->isActive() && !connected(i)) return true;
+		if ((bound(i) || kDevices[i]->isActive()) && !connected(i)) return true;
 	return false;
 }
 
@@ -317,10 +317,10 @@ void PhoneDevice::drawGlyph(Adafruit_GFX &g, int16_t x, int16_t y, int16_t s, ui
 
 bool PhoneDevice::isConnected() const { return PhoneHub::connected(_slot); }
 
+// The link stays: a phone outside the rig just gets no clicks.
 void PhoneDevice::deactivate() {
 	_active = false;
 	_releasePending = false;
-	PhoneHub::dropSlot(_slot); // a connected Mac (DVH Link) stays
 }
 
 void PhoneDevice::tick() {

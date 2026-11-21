@@ -129,6 +129,9 @@ void setup() {
 	buzzer.begin();
 
 	NimBLEDevice::init("XIAO-Remote");
+	// Max TX power (default is lower): the Mac sat at about -78 dBm and kept
+	// losing the link on supervision timeouts.
+	NimBLEDevice::setPower(20);
 	bleServer.begin(); // GATT server (HID + DVH Link) — must precede any scan
 	bleManager.begin();
 

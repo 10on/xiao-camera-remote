@@ -54,21 +54,48 @@ void BleServer::tick() {
 	// State log on change (diagnostics: "phone can't see the remote").
 	static int lastSig = -1;
 	int sig = (want ? 1 : 0) | (adv->isAdvertising() ? 2 : 0) | (_server->getConnectedCount() << 2);
+	bool scanning = NimBLEDevice::getScan()->isScanning();
+	sig |= scanning ? 1 << 8 : 0;
 	if (sig != lastSig) {
 		lastSig = sig;
-		Serial.printf("[adv] want=%d on=%d peers=%u mac=%d\n", want, adv->isAdvertising(),
-		              (unsigned)_server->getConnectedCount(), dvhLink.macConnected());
+		Serial.printf("[adv] want=%d on=%d peers=%u mac=%d scan=%d\n", want, adv->isAdvertising(),
+		              (unsigned)_server->getConnectedCount(), dvhLink.macConnected(), scanning);
+	}
+	// Bond list every 30 s (diagnostics: "keys keep getting lost").
+	static uint32_t lastBondsMs = 0;
+	if (millis() - lastBondsMs > 30000) {
+		lastBondsMs = millis();
+		int n = NimBLEDevice::getNumBonds();
+		Serial.printf("[adv] own %s type %u power %d dBm\n", NimBLEDevice::getAddress().toString().c_str(),
+		              (unsigned)NimBLEDevice::getAddress().getType(), NimBLEDevice::getPower());
+		Serial.printf("[adv] on=%d peers=%u scan=%d\n", adv->isAdvertising(),
+		              (unsigned)_server->getConnectedCount(), scanning);
+		for (int i = 0; i < PhoneHub::kSlots; i++) {
+			NimBLEAddress a;
+			bool b = PhoneHub::addressOf(i, a);
+			Serial.printf("[slot] Phone %d: %s%s%s\n", i + 1, b ? a.toString().c_str() : "-",
+			              PhoneHub::connected(i) ? " linked" : "",
+			              PhoneHub::at(i)->isActive() ? " in-rig" : "");
+		}
+		Serial.printf("[bonds] %d:", n);
+		for (int i = 0; i < n; i++) Serial.printf(" %s", NimBLEDevice::getBondedAddress(i).toString().c_str());
+		Serial.println();
 	}
 }
 
 void BleServer::onConnect(NimBLEServer *server, NimBLEConnInfo &connInfo) {
 	// Who it is (phone or Mac) is only known later: a phone encrypts the
 	// link (HID needs it), the Mac subscribes to DVH Link Event.
-	server->updateConnParams(connInfo.getConnHandle(), 12, 24, 0, 200);
+	// Supervision timeout 6 s (units of 10 ms): the radio is shared with the
+	// scan and the central links, a 2 s timeout dropped the Mac too often.
+	server->updateConnParams(connInfo.getConnHandle(), 12, 24, 0, 600);
+	Serial.printf("[srv] connect conn %u from %s\n", connInfo.getConnHandle(),
+	              connInfo.getAddress().toString().c_str());
 }
 
-void BleServer::onDisconnect(NimBLEServer *, NimBLEConnInfo &connInfo, int) {
+void BleServer::onDisconnect(NimBLEServer *, NimBLEConnInfo &connInfo, int reason) {
 	uint16_t h = connInfo.getConnHandle();
+	Serial.printf("[srv] disconnect conn %u reason 0x%x\n", h, reason);
 	PhoneHub::onPeerDisconnected(h);
 	dvhLink.onPeerDisconnected(h);
 }

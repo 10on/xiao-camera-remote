@@ -12,9 +12,12 @@
 // All slots share one HID service on the remote's GATT server (BleServer):
 // phones connect to *us*. A peer counts as a phone once its link is
 // encrypted (HID requires it). Then PhoneHub binds it to its slot — a new
-// phone takes the first free slot, preferring one the current rig wants —
-// and keeps the link only if that slot is active; otherwise it disconnects,
-// so a phone outside the configuration never records.
+// phone takes the first free slot, preferring one the current rig wants.
+// Every bonded phone stays linked whether or not its slot is in the running
+// rig: the Record click goes only to the rig's slots. Dropping phones
+// outside the rig made iOS give up reconnecting on its own.
+// Side effect: a linked iPhone treats the remote as a keyboard (no
+// on-screen keyboard while the remote is on).
 //
 // The Mac (DVH Link) may be bonded too (macOS pairs it as a HID keyboard):
 // an unknown encrypted peer is decided only after kDecideDelayMs, giving the
